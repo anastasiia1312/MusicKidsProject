@@ -1,0 +1,53 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Función auxiliar para verificar autenticación
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    // Reglas para la colección de usuarios
+    match /users/{userId} {
+      // Cualquier usuario autenticado puede leer perfiles (necesario para listar alumnos y resolver nombres)
+      allow read: if isSignedIn();
+      
+      // Permitir crear el perfil si está autenticado con el mismo UID y el rol es válido ('student' o 'teacher')
+      allow create: if isSignedIn() 
+                    && request.auth.uid == userId 
+                    && request.resource.data.uid == userId
+                    && request.resource.data.role in ['student', 'teacher'];
+                    
+      // Permitir actualizar su propio perfil manteniendo la coherencia de UID y rol válido
+      allow update: if isSignedIn() 
+                    && request.auth.uid == userId 
+                    && request.resource.data.uid == userId
+                    && request.resource.data.role in ['student', 'teacher'];
+                    
+      allow delete: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Reglas para la colección de clases (lessons)
+    match /lessons/{lessonId} {
+      // Solo el profesor o el alumno asignado pueden leer la clase
+      allow read: if isSignedIn() && (
+        resource.data.teacherId == request.auth.uid || 
+        resource.data.studentId == request.auth.uid
+      );
+      
+      // Solo un profesor puede crear clases asignándose a sí mismo como teacherId
+      allow create: if isSignedIn() 
+                    && request.resource.data.teacherId == request.auth.uid
+                    && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher'
+                    && request.resource.data.status in ['scheduled', 'in_progress', 'completed', 'cancelled'];
+                    
+      // Solo el profesor creador puede actualizar o eliminar la clase
+      allow update: if isSignedIn() 
+                    && resource.data.teacherId == request.auth.uid
+                    && request.resource.data.teacherId == request.auth.uid;
+                    
+      allow delete: if isSignedIn() && resource.data.teacherId == request.auth.uid;
+    }
+  }
+}

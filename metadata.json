@@ -1,0 +1,6 @@
+{
+  "name": "MusicKids",
+  "description": "Plataforma web de clases particulares de música entre profesores y alumnos con autenticación y gestión de roles.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

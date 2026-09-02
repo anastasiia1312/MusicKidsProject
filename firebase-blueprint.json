@@ -1,0 +1,47 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Perfil de usuario (profesor o alumno)",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["student", "teacher"] },
+        "photoURL": { "type": "string" },
+        "authProvider": { "type": "string", "enum": ["email", "google"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "email", "role", "authProvider"]
+    },
+    "Lesson": {
+      "title": "Lesson",
+      "description": "Clase de música particular entre profesor y alumno con enlace de Google Meet",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "duration": { "type": "number", "enum": [30, 45, 60, 90] },
+        "status": { "type": "string", "enum": ["scheduled", "in_progress", "completed", "cancelled"] },
+        "meetUrl": { "type": "string" },
+        "meetSpaceName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "teacherId", "studentId", "date", "duration", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "entity": "User",
+      "description": "Documentos de usuarios identificados por su UID de Firebase Authentication."
+    },
+    "/lessons/{lessonId}": {
+      "entity": "Lesson",
+      "description": "Colección de clases de música asignadas entre un profesor y un alumno."
+    }
+  }
+}
