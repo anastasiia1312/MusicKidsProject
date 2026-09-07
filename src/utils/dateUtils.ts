@@ -78,3 +78,47 @@ export function getLessonStatusLabel(status: string): string {
       return 'Programada';
   }
 }
+
+/**
+ * Obtiene la etiqueta temporal amigable para las tarjetas de clase (ej: "Comienza en 15 min", "Mañana a las 14:00")
+ */
+export function getLessonTimingLabel(timestamp: Timestamp | Date | any): string {
+  if (!timestamp) return 'Fecha pendiente';
+
+  const dateObj = timestamp instanceof Timestamp
+    ? timestamp.toDate()
+    : (timestamp instanceof Date ? timestamp : new Date(timestamp));
+
+  if (isNaN(dateObj.getTime())) return 'Fecha pendiente';
+
+  const now = new Date();
+  const diffMs = dateObj.getTime() - now.getTime();
+  const diffMinutes = Math.round(diffMs / (1000 * 60));
+
+  if (diffMinutes > 0 && diffMinutes <= 60) {
+    return `Comienza en ${diffMinutes} min`;
+  }
+
+  if (diffMinutes > 60 && diffMinutes <= 180) {
+    const hours = Math.round(diffMinutes / 60);
+    return `Comienza en ${hours} hora${hours > 1 ? 's' : ''}`;
+  }
+
+  const hours = String(dateObj.getHours()).padStart(2, '0');
+  const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+  const timeStr = `${hours}:${minutes}`;
+
+  if (dateObj.toDateString() === now.toDateString()) {
+    return `Hoy a las ${timeStr}`;
+  }
+
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (dateObj.toDateString() === tomorrow.toDateString()) {
+    return `Mañana a las ${timeStr}`;
+  }
+
+  const day = String(dateObj.getDate()).padStart(2, '0');
+  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+  return `${day}/${month} a las ${timeStr}`;
+}
