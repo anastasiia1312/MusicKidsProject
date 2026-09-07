@@ -1,1 +1,13 @@
 @import "tailwindcss";
+
+@layer utilities {
+  .font-abril {
+    font-family: 'Abril Fatface', cursive, serif;
+  }
+  .font-parkinsans {
+    font-family: 'Parkinsans', sans-serif;
+  }
+  .font-siemreap {
+    font-family: 'Siemreap', sans-serif;
+  }
+}

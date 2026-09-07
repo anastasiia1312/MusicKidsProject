@@ -7,6 +7,7 @@ import { TeacherDashboard } from './pages/teacher/TeacherDashboard';
 import { CreateLesson } from './pages/teacher/CreateLesson';
 import { StudentDashboard } from './pages/student/StudentDashboard';
 import { LessonPage } from './pages/LessonPage';
+import { LandingPage } from './pages/LandingPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { RoleRoute } from './components/RoleRoute';
 import { LoadingScreen } from './components/common/LoadingScreen';
@@ -18,6 +19,7 @@ function AppContent() {
   const getInitialPath = (): string => {
     const pathname = window.location.pathname;
     if (
+      pathname === '/' ||
       pathname === '/register' ||
       pathname === '/login' ||
       pathname === '/select-role' ||
@@ -28,7 +30,7 @@ function AppContent() {
     ) {
       return pathname;
     }
-    return '/login';
+    return '/';
   };
 
   const [currentPath, setCurrentPath] = useState<string>(getInitialPath);
@@ -86,8 +88,7 @@ function AppContent() {
         currentPath === '/teacher/lessons/new' ||
         currentPath === '/student/dashboard' ||
         currentPath.startsWith('/lesson/') ||
-        currentPath === '/select-role' ||
-        currentPath === '/'
+        currentPath === '/select-role'
       ) {
         navigate('/login');
       }
@@ -113,6 +114,9 @@ function AppContent() {
     case '/register':
       return <Register onNavigate={navigate} />;
 
+    case '/login':
+      return <Login onNavigate={navigate} />;
+
     case '/select-role':
       return <SelectRole onNavigate={navigate} />;
 
@@ -137,9 +141,9 @@ function AppContent() {
         </RoleRoute>
       );
 
-    case '/login':
+    case '/':
     default:
-      return <Login onNavigate={navigate} />;
+      return <LandingPage onNavigate={navigate} />;
   }
 }
 
