@@ -32,6 +32,22 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["title", "teacherId", "studentId", "date", "duration", "status"]
+    },
+    "WhiteboardState": {
+      "title": "WhiteboardState",
+      "description": "Estado de la pizarra colaborativa en tiempo real de la clase",
+      "type": "object",
+      "properties": {
+        "strokes": {
+          "type": "array",
+          "description": "Lista de trazos dibujados en la pizarra"
+        },
+        "templates": {
+          "type": "array",
+          "description": "Lista de plantillas musicales (pentagrama, tablatura) añadidas a la pizarra"
+        },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
     }
   },
   "firestore": {
@@ -42,6 +58,10 @@
     "/lessons/{lessonId}": {
       "entity": "Lesson",
       "description": "Colección de clases de música asignadas entre un profesor y un alumno."
+    },
+    "/lessons/{lessonId}/whiteboard/{docId}": {
+      "entity": "WhiteboardState",
+      "description": "Documento de estado de la pizarra en tiempo real de una clase específica."
     }
   }
 }

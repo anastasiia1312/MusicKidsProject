@@ -434,7 +434,7 @@ export const LessonPage: React.FC<LessonPageProps> = ({ lessonId, onNavigate }) 
             <>
               {/* ÁREA PRINCIPAL: PIZARRA (O PIANO EXPANDIDO) */}
               <div className={activeMainTool === 'whiteboard' ? 'block' : 'hidden'}>
-                <Whiteboard isVisible={activeMainTool === 'whiteboard'} />
+                <Whiteboard isVisible={activeMainTool === 'whiteboard'} lessonId={lessonId} />
               </div>
 
               {activeMainTool === 'piano' && (

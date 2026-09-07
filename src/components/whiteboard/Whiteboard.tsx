@@ -5,13 +5,24 @@ import type {
   WhiteboardTool,
   MusicTemplate,
   MusicTemplateType,
+  WhiteboardStroke,
 } from './types';
+import {
+  subscribeToWhiteboard,
+  saveStroke,
+  saveTemplates,
+  clearWhiteboard,
+} from '../../services/whiteboardService';
 
 export interface WhiteboardProps {
   isVisible?: boolean;
+  lessonId?: string;
 }
 
-export const Whiteboard: React.FC<WhiteboardProps> = ({ isVisible = true }) => {
+export const Whiteboard: React.FC<WhiteboardProps> = ({
+  isVisible = true,
+  lessonId,
+}) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -33,6 +44,10 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({ isVisible = true }) => {
 
   // Canvas en memoria para conservar los trazos del lápiz/borrador de forma independiente
   const drawingCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Historial de trazos sincronizados
+  const strokesRef = useRef<WhiteboardStroke[]>([]);
+  const currentStrokeRef = useRef<WhiteboardStroke | null>(null);
 
   // Referencias para selección, arrastre y resize
   const templatesRef = useRef<MusicTemplate[]>(templates);
@@ -114,8 +129,8 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({ isVisible = true }) => {
     // Barras verticales de cierre en los extremos
     ctx.beginPath();
     ctx.moveTo(x, y);
-    ctx.lineTo(x, y + height);
-    ctx.moveTo(x + width, y);
+    ctx.lineTo(x + width, y);
+    ctx.moveTo(x, y + height);
     ctx.lineTo(x + width, y + height);
     ctx.stroke();
 
@@ -198,6 +213,63 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({ isVisible = true }) => {
   }, []);
 
   /**
+   * Re-dibuja todos los trazos almacenados sobre el canvas en memoria
+   */
+  const redrawDrawingCanvas = useCallback((strokes: WhiteboardStroke[]) => {
+    const dCanvas = drawingCanvasRef.current;
+    if (!dCanvas || dCanvas.width === 0 || dCanvas.height === 0) return;
+    const dctx = dCanvas.getContext('2d');
+    if (!dctx) return;
+
+    const dpr = window.devicePixelRatio || 1;
+
+    dctx.save();
+    dctx.setTransform(1, 0, 0, 1, 0, 0);
+    dctx.clearRect(0, 0, dCanvas.width, dCanvas.height);
+    dctx.restore();
+
+    strokes.forEach((stroke) => {
+      if (!stroke.points || stroke.points.length === 0) return;
+
+      dctx.save();
+      dctx.scale(dpr, dpr);
+      dctx.lineCap = 'round';
+      dctx.lineJoin = 'round';
+
+      if (stroke.tool === 'eraser') {
+        dctx.globalCompositeOperation = 'destination-out';
+        dctx.lineWidth = stroke.lineWidth * 3;
+      } else {
+        dctx.globalCompositeOperation = 'source-over';
+        dctx.strokeStyle = stroke.color;
+        dctx.fillStyle = stroke.color;
+        dctx.lineWidth = stroke.lineWidth;
+      }
+
+      if (stroke.points.length === 1) {
+        dctx.beginPath();
+        dctx.arc(
+          stroke.points[0].x,
+          stroke.points[0].y,
+          dctx.lineWidth / 2,
+          0,
+          Math.PI * 2
+        );
+        dctx.fill();
+      } else {
+        dctx.beginPath();
+        dctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+        for (let i = 1; i < stroke.points.length; i++) {
+          dctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+        }
+        dctx.stroke();
+      }
+
+      dctx.restore();
+    });
+  }, []);
+
+  /**
    * Inicializa o redimensiona el canvas manteniendo la nitidez con devicePixelRatio
    */
   const setupCanvas = useCallback(() => {
@@ -208,17 +280,24 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({ isVisible = true }) => {
     const rect = container.getBoundingClientRect();
     if (rect.width === 0) return;
     const displayWidth = rect.width;
-    const displayHeight = Math.max(500, Math.min(580, window.innerHeight * 0.6));
-
-    if (
-      canvas.style.width === `${displayWidth}px` &&
-      canvas.style.height === `${displayHeight}px` &&
-      canvas.width > 0
-    ) {
-      return;
-    }
+    const displayHeight = Math.max(
+      500,
+      Math.min(580, window.innerHeight * 0.6)
+    );
 
     const dpr = window.devicePixelRatio || 1;
+    const newPixelWidth = displayWidth * dpr;
+    const newPixelHeight = displayHeight * dpr;
+
+    if (
+      canvas.width === newPixelWidth &&
+      canvas.height === newPixelHeight &&
+      canvas.style.width === `${displayWidth}px` &&
+      canvas.style.height === `${displayHeight}px`
+    ) {
+      renderComposite();
+      return;
+    }
 
     // Inicializar o adaptar el canvas en memoria de los trazos
     if (!drawingCanvasRef.current) {
@@ -226,35 +305,20 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({ isVisible = true }) => {
     }
     const drawingCanvas = drawingCanvasRef.current;
 
-    const prevWidth = drawingCanvas.width;
-    const prevHeight = drawingCanvas.height;
-
-    // Configurar dimensiones reales del buffer escaladas por DPR
-    canvas.width = displayWidth * dpr;
-    canvas.height = displayHeight * dpr;
+    canvas.width = newPixelWidth;
+    canvas.height = newPixelHeight;
     canvas.style.width = `${displayWidth}px`;
     canvas.style.height = `${displayHeight}px`;
 
-    // Si es primera vez o cambió el tamaño del buffer en memoria
-    if (prevWidth === 0 || prevHeight === 0) {
-      drawingCanvas.width = canvas.width;
-      drawingCanvas.height = canvas.height;
-    } else if (prevWidth !== canvas.width || prevHeight !== canvas.height) {
-      const temp = document.createElement('canvas');
-      temp.width = prevWidth;
-      temp.height = prevHeight;
-      const tctx = temp.getContext('2d');
-      if (tctx) tctx.drawImage(drawingCanvas, 0, 0);
+    drawingCanvas.width = newPixelWidth;
+    drawingCanvas.height = newPixelHeight;
 
-      drawingCanvas.width = canvas.width;
-      drawingCanvas.height = canvas.height;
-      const dctx = drawingCanvas.getContext('2d');
-      if (dctx) dctx.drawImage(temp, 0, 0);
-    }
-
+    // Redibujar todos los trazos sincronizados en el nuevo buffer
+    redrawDrawingCanvas(strokesRef.current);
     renderComposite();
-  }, [renderComposite]);
+  }, [redrawDrawingCanvas, renderComposite]);
 
+  // Redimensionamiento y montaje
   useEffect(() => {
     setupCanvas();
 
@@ -281,6 +345,72 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({ isVisible = true }) => {
     }
   }, [isVisible, setupCanvas, renderComposite]);
 
+  /**
+   * Sincronización en tiempo real mediante Firestore onSnapshot vinculada al lessonId
+   */
+  useEffect(() => {
+    if (!lessonId) return;
+
+    const unsubscribe = subscribeToWhiteboard(lessonId, (data) => {
+      // 1. Sincronizar trazos
+      strokesRef.current = data.strokes;
+      redrawDrawingCanvas(data.strokes);
+
+      // Si el usuario local estaba dibujando en ese instante, re-dibujar el segmento local
+      if (isDrawingRef.current && currentStrokeRef.current) {
+        const dCanvas = drawingCanvasRef.current;
+        if (dCanvas) {
+          const dctx = dCanvas.getContext('2d');
+          if (dctx) {
+            const dpr = window.devicePixelRatio || 1;
+            const stroke = currentStrokeRef.current;
+            dctx.save();
+            dctx.scale(dpr, dpr);
+            dctx.lineCap = 'round';
+            dctx.lineJoin = 'round';
+            if (stroke.tool === 'eraser') {
+              dctx.globalCompositeOperation = 'destination-out';
+              dctx.lineWidth = stroke.lineWidth * 3;
+            } else {
+              dctx.globalCompositeOperation = 'source-over';
+              dctx.strokeStyle = stroke.color;
+              dctx.lineWidth = stroke.lineWidth;
+            }
+            if (stroke.points.length > 1) {
+              dctx.beginPath();
+              dctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+              for (let i = 1; i < stroke.points.length; i++) {
+                dctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+              }
+              dctx.stroke();
+            }
+            dctx.restore();
+          }
+        }
+      }
+
+      // 2. Sincronizar plantillas musicales (evitar pisar si el usuario local está arrastrando/redimensionando)
+      if (!dragStateRef.current.isDragging && !dragStateRef.current.isResizing) {
+        setTemplates(data.templates);
+        templatesRef.current = data.templates;
+
+        if (
+          selectedTemplateIdRef.current &&
+          !data.templates.some((t) => t.id === selectedTemplateIdRef.current)
+        ) {
+          setSelectedTemplateId(null);
+        }
+      }
+
+      // 3. Renderizar la composición
+      renderComposite();
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [lessonId, redrawDrawingCanvas, renderComposite]);
+
   // Soporte de tecla Delete / Backspace para borrar la plantilla seleccionada
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -290,7 +420,10 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({ isVisible = true }) => {
         toolRef.current === 'select'
       ) {
         const target = e.target as HTMLElement;
-        if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        if (
+          target &&
+          (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')
+        ) {
           return;
         }
         e.preventDefault();
@@ -300,12 +433,14 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({ isVisible = true }) => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [lessonId]);
 
   /**
    * Obtiene las coordenadas precisas del puntero en el sistema de coordenadas lógicas
    */
-  const getCoordinates = (e: React.PointerEvent<HTMLCanvasElement>): { x: number; y: number } => {
+  const getCoordinates = (
+    e: React.PointerEvent<HTMLCanvasElement>
+  ): { x: number; y: number } => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
 
@@ -424,6 +559,19 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({ isVisible = true }) => {
     isDrawingRef.current = true;
     lastPointRef.current = point;
 
+    const roundedPoint = {
+      x: Math.round(point.x * 10) / 10,
+      y: Math.round(point.y * 10) / 10,
+    };
+
+    currentStrokeRef.current = {
+      id: `stroke-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      tool: toolRef.current,
+      color: toolRef.current === 'eraser' ? '#000000' : colorRef.current,
+      lineWidth: lineWidthRef.current,
+      points: [roundedPoint],
+    };
+
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
@@ -466,38 +614,39 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({ isVisible = true }) => {
       if (drag.isDragging && drag.templateId) {
         const dx = point.x - drag.startX;
         const dy = point.y - drag.startY;
-        const newX = Math.max(10, drag.initialX + dx);
-        const newY = Math.max(20, drag.initialY + dy);
+        const newX = Math.max(10, Math.round(drag.initialX + dx));
+        const newY = Math.max(20, Math.round(drag.initialY + dy));
 
-        setTemplates((prev) =>
-          prev.map((t) =>
-            t.id === drag.templateId ? { ...t, x: newX, y: newY } : t
-          )
+        const updated = templatesRef.current.map((t) =>
+          t.id === drag.templateId ? { ...t, x: newX, y: newY } : t
         );
+        templatesRef.current = updated;
+        setTemplates(updated);
         return;
       }
 
       if (drag.isResizing && drag.templateId) {
         const dx = point.x - drag.startX;
         const dy = point.y - drag.startY;
-        // Límites mínimos para mantener las líneas legibles
-        const newWidth = Math.max(150, drag.initialWidth + dx);
-        const newHeight = Math.max(40, drag.initialHeight + dy);
+        const newWidth = Math.max(150, Math.round(drag.initialWidth + dx));
+        const newHeight = Math.max(40, Math.round(drag.initialHeight + dy));
 
-        setTemplates((prev) =>
-          prev.map((t) =>
-            t.id === drag.templateId
-              ? { ...t, width: newWidth, height: newHeight }
-              : t
-          )
+        const updated = templatesRef.current.map((t) =>
+          t.id === drag.templateId
+            ? { ...t, width: newWidth, height: newHeight }
+            : t
         );
+        templatesRef.current = updated;
+        setTemplates(updated);
         return;
       }
       return;
     }
 
     // Modo Dibujo
-    if (!isDrawingRef.current || !lastPointRef.current) return;
+    if (!isDrawingRef.current || !lastPointRef.current || !currentStrokeRef.current)
+      return;
+
     const dCanvas = drawingCanvasRef.current;
     if (!dCanvas) return;
     const dctx = dCanvas.getContext('2d');
@@ -525,6 +674,13 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({ isVisible = true }) => {
     dctx.stroke();
     dctx.restore();
 
+    // Guardar punto con precisión de 1 decimal para eficiencia de almacenamiento
+    const roundedPoint = {
+      x: Math.round(point.x * 10) / 10,
+      y: Math.round(point.y * 10) / 10,
+    };
+    currentStrokeRef.current.points.push(roundedPoint);
+
     lastPointRef.current = point;
     renderComposite();
   };
@@ -533,15 +689,25 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({ isVisible = true }) => {
    * Fin de la pulsación
    */
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    // Si estaba arrastrando o redimensionando una plantilla, persistir en Firestore
     if (toolRef.current === 'select') {
+      const wasModifying =
+        dragStateRef.current.isDragging || dragStateRef.current.isResizing;
       dragStateRef.current.isDragging = false;
       dragStateRef.current.isResizing = false;
+
       try {
         if (e.currentTarget.hasPointerCapture(e.pointerId)) {
           e.currentTarget.releasePointerCapture(e.pointerId);
         }
       } catch {
         // Fallback
+      }
+
+      if (wasModifying && lessonId) {
+        saveTemplates(lessonId, templatesRef.current).catch((err) => {
+          console.error('Error al guardar posición de plantilla:', err);
+        });
       }
       return;
     }
@@ -557,16 +723,32 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({ isVisible = true }) => {
     } catch {
       // Fallback
     }
+
+    // Persistir el trazo completo en Firestore al levantar el puntero
+    const strokeToSave = currentStrokeRef.current;
+    currentStrokeRef.current = null;
+
+    if (strokeToSave && strokeToSave.points.length > 0) {
+      strokesRef.current = [...strokesRef.current, strokeToSave];
+
+      if (lessonId) {
+        saveStroke(lessonId, strokeToSave).catch((err) => {
+          console.error('Error al guardar trazo en Firestore:', err);
+        });
+      }
+    }
   };
 
   const handlePointerLeave = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    handlePointerUp(e);
+    if (isDrawingRef.current || dragStateRef.current.isDragging || dragStateRef.current.isResizing) {
+      handlePointerUp(e);
+    }
   };
 
   /**
-   * Insertar una nueva plantilla musical en la pizarra
+   * Insertar una nueva plantilla musical en la pizarra y sincronizarla
    */
-  const handleAddTemplate = (type: MusicTemplateType) => {
+  const handleAddTemplate = async (type: MusicTemplateType) => {
     const container = containerRef.current;
     const containerWidth = container?.clientWidth || 700;
 
@@ -579,7 +761,10 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({ isVisible = true }) => {
 
     // Desplazamiento progresivo para que no se superpongan exactamente
     const offset = (templates.length % 6) * 25;
-    const x = Math.max(20, Math.min(50 + offset, containerWidth - defaultWidth - 20));
+    const x = Math.max(
+      20,
+      Math.min(50 + offset, containerWidth - defaultWidth - 20)
+    );
     const y = 45 + offset;
 
     const newTemplate: MusicTemplate = {
@@ -598,50 +783,92 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({ isVisible = true }) => {
           : 'Tablatura Guitarra',
     };
 
-    setTemplates((prev) => [...prev, newTemplate]);
+    const updated = [...templatesRef.current, newTemplate];
+    templatesRef.current = updated;
+    setTemplates(updated);
     setSelectedTemplateId(newTemplate.id);
     setTool('select');
+
+    if (lessonId) {
+      try {
+        await saveTemplates(lessonId, updated);
+      } catch (err) {
+        console.error('Error al guardar nueva plantilla:', err);
+      }
+    }
   };
 
   /**
-   * Eliminar la plantilla seleccionada
+   * Eliminar la plantilla seleccionada y sincronizar en Firestore
    */
-  const handleDeleteSelectedTemplate = () => {
+  const handleDeleteSelectedTemplate = async () => {
     if (!selectedTemplateId) return;
-    setTemplates((prev) => prev.filter((t) => t.id !== selectedTemplateId));
+    const updated = templatesRef.current.filter(
+      (t) => t.id !== selectedTemplateId
+    );
+    templatesRef.current = updated;
+    setTemplates(updated);
     setSelectedTemplateId(null);
+
+    if (lessonId) {
+      try {
+        await saveTemplates(lessonId, updated);
+      } catch (err) {
+        console.error('Error al eliminar plantilla seleccionada:', err);
+      }
+    }
   };
 
   /**
-   * Limpiar toda la pizarra (trazos y plantillas)
+   * Limpiar únicamente las plantillas musicales
    */
-  const handleClear = () => {
+  const handleClearTemplates = async () => {
+    templatesRef.current = [];
+    setTemplates([]);
+    setSelectedTemplateId(null);
+
+    if (lessonId) {
+      try {
+        await saveTemplates(lessonId, []);
+      } catch (err) {
+        console.error('Error al limpiar plantillas:', err);
+      }
+    }
+  };
+
+  /**
+   * Limpiar toda la pizarra (trazos y plantillas) y sincronizar el estado vacío
+   */
+  const handleClear = async () => {
+    strokesRef.current = [];
+    templatesRef.current = [];
+    setTemplates([]);
+    setSelectedTemplateId(null);
+
     if (drawingCanvasRef.current) {
       const dctx = drawingCanvasRef.current.getContext('2d');
       if (dctx) {
+        dctx.save();
+        dctx.setTransform(1, 0, 0, 1, 0, 0);
         dctx.clearRect(
           0,
           0,
           drawingCanvasRef.current.width,
           drawingCanvasRef.current.height
         );
+        dctx.restore();
       }
     }
 
-    setTemplates([]);
-    setSelectedTemplateId(null);
+    renderComposite();
 
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.restore();
+    if (lessonId) {
+      try {
+        await clearWhiteboard(lessonId);
+      } catch (err) {
+        console.error('Error al limpiar pizarra en Firestore:', err);
+      }
+    }
   };
 
   // Cursor del área de pizarra según herramienta
@@ -684,10 +911,7 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({ isVisible = true }) => {
         onLineWidthChange={setLineWidth}
         onClear={handleClear}
         onAddTemplate={handleAddTemplate}
-        onClearTemplates={() => {
-          setTemplates([]);
-          setSelectedTemplateId(null);
-        }}
+        onClearTemplates={handleClearTemplates}
         hasSelectedTemplate={Boolean(selectedTemplateId)}
         onDeleteSelectedTemplate={handleDeleteSelectedTemplate}
       />

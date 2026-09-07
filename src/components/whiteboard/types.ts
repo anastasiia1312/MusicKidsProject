@@ -12,3 +12,21 @@ export interface MusicTemplate {
   lineCount: number;
   title: string;
 }
+
+export interface WhiteboardPoint {
+  x: number;
+  y: number;
+}
+
+export interface WhiteboardStroke {
+  id: string;
+  tool: 'pen' | 'eraser';
+  color: string;
+  lineWidth: number;
+  points: WhiteboardPoint[];
+}
+
+export interface WhiteboardData {
+  strokes: WhiteboardStroke[];
+  templates: MusicTemplate[];
+}
