@@ -7,7 +7,11 @@ import type {
   MusicTemplateType,
 } from './types';
 
-export const Whiteboard: React.FC = () => {
+export interface WhiteboardProps {
+  isVisible?: boolean;
+}
+
+export const Whiteboard: React.FC<WhiteboardProps> = ({ isVisible = true }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -202,6 +206,7 @@ export const Whiteboard: React.FC = () => {
     if (!canvas || !container) return;
 
     const rect = container.getBoundingClientRect();
+    if (rect.width === 0) return;
     const displayWidth = rect.width;
     const displayHeight = Math.max(500, Math.min(580, window.innerHeight * 0.6));
 
@@ -267,6 +272,14 @@ export const Whiteboard: React.FC = () => {
   useEffect(() => {
     renderComposite();
   }, [templates, selectedTemplateId, tool, renderComposite]);
+
+  // Si vuelve a ser visible tras intercambio con el piano, redibujar sin perder trazos
+  useEffect(() => {
+    if (isVisible) {
+      setupCanvas();
+      renderComposite();
+    }
+  }, [isVisible, setupCanvas, renderComposite]);
 
   // Soporte de tecla Delete / Backspace para borrar la plantilla seleccionada
   useEffect(() => {
@@ -642,16 +655,16 @@ export const Whiteboard: React.FC = () => {
   return (
     <div
       id="lesson-whiteboard-section"
-      className="bg-white rounded-3xl border border-slate-200/80 shadow-xl shadow-indigo-100/30 overflow-hidden"
+      className="bg-white rounded-[28px] border border-slate-200/90 shadow-2xs overflow-hidden"
     >
       {/* Encabezado de la pizarra */}
-      <div className="p-5 sm:p-6 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100">
+      <div className="p-4 sm:p-5 pb-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shadow-md shadow-indigo-100 shrink-0">
+          <div className="w-10 h-10 rounded-full bg-[#E8F3F8] text-[#00537A] flex items-center justify-center shrink-0">
             <PenTool className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-slate-900">
+            <h2 className="text-base sm:text-lg font-bold text-slate-900">
               Pizarra de la clase
             </h2>
             <p className="text-xs text-slate-500">
@@ -671,6 +684,10 @@ export const Whiteboard: React.FC = () => {
         onLineWidthChange={setLineWidth}
         onClear={handleClear}
         onAddTemplate={handleAddTemplate}
+        onClearTemplates={() => {
+          setTemplates([]);
+          setSelectedTemplateId(null);
+        }}
         hasSelectedTemplate={Boolean(selectedTemplateId)}
         onDeleteSelectedTemplate={handleDeleteSelectedTemplate}
       />
@@ -679,7 +696,7 @@ export const Whiteboard: React.FC = () => {
       <div
         ref={containerRef}
         className="w-full bg-white relative select-none overflow-hidden"
-        style={{ cursor: getCanvasCursor(), minHeight: '500px' }}
+        style={{ cursor: getCanvasCursor(), minHeight: '480px' }}
       >
         <canvas
           ref={canvasRef}

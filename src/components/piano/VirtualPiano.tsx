@@ -1,12 +1,20 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Volume2, VolumeX, Piano } from 'lucide-react';
+import { Volume2, VolumeX, Piano, Maximize2, Minimize2 } from 'lucide-react';
 import {
   PIANO_NOTES,
   type PianoNoteData,
   type ActiveOscillator,
 } from './pianoNotes';
 
-export const VirtualPiano: React.FC = () => {
+export interface VirtualPianoProps {
+  isExpanded?: boolean;
+  onToggleExpand?: () => void;
+}
+
+export const VirtualPiano: React.FC<VirtualPianoProps> = ({
+  isExpanded = false,
+  onToggleExpand,
+}) => {
   const [volume, setVolume] = useState<number>(60);
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [activeNotes, setActiveNotes] = useState<Set<string>>(new Set());
@@ -245,72 +253,128 @@ export const VirtualPiano: React.FC = () => {
   return (
     <div
       id="lesson-virtual-piano-section"
-      className="bg-white rounded-3xl border border-slate-200/80 shadow-xl shadow-indigo-100/30 overflow-hidden select-none"
+      className={`bg-white rounded-[28px] border border-slate-200/90 shadow-2xs overflow-hidden select-none flex flex-col justify-between ${
+        !isExpanded ? 'hover:border-slate-300 transition-colors' : ''
+      }`}
     >
       {/* Encabezado y controles de volumen */}
-      <div className="p-5 sm:p-6 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100">
+      <div
+        className={`p-4 sm:p-5 pb-3 flex items-center justify-between border-b border-slate-100 ${
+          !isExpanded && onToggleExpand ? 'cursor-pointer hover:bg-slate-50/50 transition-colors' : ''
+        }`}
+        onClick={!isExpanded && onToggleExpand ? onToggleExpand : undefined}
+      >
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shadow-md shadow-indigo-100 shrink-0">
+          <div className="w-10 h-10 rounded-full bg-[#E8F3F8] text-[#00537A] flex items-center justify-center shrink-0">
             <Piano className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-              <span>Piano virtual</span>
-              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200/60">
-                2 Octavas
-              </span>
+            <h2 className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
+              <span>Piano</span>
+              {isExpanded && (
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-[#00537A] border border-indigo-200/60">
+                  2 Octavas
+                </span>
+              )}
             </h2>
-            <p className="text-xs text-slate-500">
-              Tocá las teclas del piano con mouse o pantalla táctil.
-            </p>
+            {isExpanded && (
+              <p className="text-xs text-slate-500 hidden sm:block">
+                Tocá las teclas del piano con mouse o pantalla táctil.
+              </p>
+            )}
           </div>
         </div>
 
-        {/* Control de Volumen */}
-        <div className="flex items-center gap-3 bg-slate-50 px-4 py-2 rounded-2xl border border-slate-200/80">
+        {/* Control de Volumen y Botón de alternancia */}
+        <div
+          className="flex items-center gap-2"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {isExpanded && (
+            <div className="hidden sm:flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-200/80 mr-1">
+              <label
+                htmlFor="piano-volume-slider"
+                className="text-xs font-bold text-slate-600 w-10 text-right"
+              >
+                {isMuted ? '0%' : `${volume}%`}
+              </label>
+              <input
+                id="piano-volume-slider"
+                type="range"
+                min="0"
+                max="100"
+                value={isMuted ? 0 : volume}
+                onChange={(e) => {
+                  setVolume(Number(e.target.value));
+                  if (isMuted) setIsMuted(false);
+                }}
+                aria-label="Volumen del piano virtual"
+                className="w-20 sm:w-24 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#00537A]"
+              />
+            </div>
+          )}
+
           <button
             id="btn-piano-toggle-mute"
             type="button"
             aria-label={isMuted ? 'Activar sonido del piano' : 'Silenciar piano'}
             onClick={() => setIsMuted(!isMuted)}
-            className="p-1.5 rounded-xl hover:bg-slate-200 text-slate-700 transition cursor-pointer"
+            className="p-1.5 rounded-full hover:bg-slate-100 text-slate-600 transition cursor-pointer"
           >
             {isMuted || volume === 0 ? (
               <VolumeX className="w-4 h-4 text-rose-500" />
             ) : (
-              <Volume2 className="w-4 h-4 text-indigo-600" />
+              <Volume2 className="w-4 h-4 text-[#00537A]" />
             )}
           </button>
 
-          <div className="flex items-center gap-2">
-            <label
-              htmlFor="piano-volume-slider"
-              className="text-xs font-bold text-slate-600 w-12"
-            >
-              {isMuted ? '0%' : `${volume}%`}
-            </label>
-            <input
-              id="piano-volume-slider"
-              type="range"
-              min="0"
-              max="100"
-              value={isMuted ? 0 : volume}
-              onChange={(e) => {
-                setVolume(Number(e.target.value));
-                if (isMuted) setIsMuted(false);
-              }}
-              aria-label="Volumen del piano virtual"
-              className="w-24 sm:w-28 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-            />
-          </div>
+          {onToggleExpand && (
+            isExpanded ? (
+              <button
+                id="btn-piano-collapse"
+                type="button"
+                aria-label="Volver a la Pizarra"
+                onClick={onToggleExpand}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer ml-1"
+                title="Volver a la Pizarra"
+              >
+                <Minimize2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Volver a la Pizarra</span>
+                <span className="sm:hidden">Pizarra</span>
+              </button>
+            ) : (
+              <button
+                id="btn-piano-expand"
+                type="button"
+                aria-label="Expandir piano al área principal"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleExpand();
+                }}
+                className="p-1.5 rounded-full hover:bg-slate-100 text-slate-600 hover:text-[#00537A] transition cursor-pointer"
+                title="Expandir al área principal"
+              >
+                <Maximize2 className="w-4 h-4" />
+              </button>
+            )
+          )}
         </div>
       </div>
 
       {/* Contenedor del Teclado del Piano */}
-      <div className="p-4 sm:p-6 bg-slate-900 overflow-x-auto">
+      <div className={`p-4 sm:p-5 flex-1 flex flex-col justify-center overflow-x-auto ${isExpanded ? 'min-h-[300px]' : ''}`}>
         <div
-          className="relative mx-auto rounded-b-xl overflow-hidden bg-slate-950 p-2 pt-0 shadow-2xl border-t-8 border-rose-900/80"
-          style={{ minWidth: '680px', maxWidth: '960px', height: '220px' }}
+          className={`relative mx-auto rounded-xl overflow-hidden bg-slate-900 shadow-md ${
+            isExpanded
+              ? 'p-2 pt-0 border-t-6 border-slate-700'
+              : 'p-1.5 pt-0 border-t-4 border-slate-700'
+          }`}
+          style={{
+            width: '100%',
+            minWidth: isExpanded ? '640px' : '320px',
+            maxWidth: isExpanded ? '1020px' : '420px',
+            height: isExpanded ? '280px' : '170px',
+          }}
         >
           {/* Capa 1: Teclas Blancas */}
           <div className="w-full h-full flex gap-[2px]">
@@ -327,7 +391,9 @@ export const VirtualPiano: React.FC = () => {
                   onPointerDown={(e) => handlePointerDown(note, e)}
                   onPointerUp={(e) => handlePointerUp(note, e)}
                   onPointerCancel={(e) => handlePointerCancel(note, e)}
-                  className={`flex-1 h-full rounded-b-md flex flex-col justify-end pb-3.5 items-center transition-all cursor-pointer select-none active:scale-[0.99] origin-top ${
+                  className={`flex-1 h-full rounded-b-md flex flex-col justify-end items-center transition-all cursor-pointer select-none active:scale-[0.99] origin-top ${
+                    isExpanded ? 'pb-5 sm:pb-6' : 'pb-3.5'
+                  } ${
                     isPressed
                       ? 'bg-amber-100 text-slate-950 shadow-inner translate-y-0.5 ring-2 ring-indigo-500'
                       : 'bg-white hover:bg-slate-50 text-slate-700 shadow-md'
@@ -336,13 +402,17 @@ export const VirtualPiano: React.FC = () => {
                 >
                   {/* Círculo de color con fondo blanco y borde de color con la letra de la nota */}
                   <div
-                    className="w-7 h-7 rounded-full bg-white flex items-center justify-center border-2 shadow-xs transition-transform"
+                    className={`${
+                      isExpanded ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-7 h-7'
+                    } rounded-full bg-white flex items-center justify-center border-2 shadow-xs transition-transform`}
                     style={{
                       borderColor: colorCfg?.borderColor || '#64748b',
                     }}
                   >
                     <span
-                      className="font-extrabold text-xs leading-none"
+                      className={`font-extrabold leading-none ${
+                        isExpanded ? 'text-xs sm:text-sm' : 'text-xs'
+                      }`}
                       style={{
                         color: colorCfg?.textColor || '#0f172a',
                       }}

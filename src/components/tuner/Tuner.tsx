@@ -228,204 +228,180 @@ export const Tuner: React.FC = () => {
   const clampedCents = Math.max(-50, Math.min(50, cents));
   const indicatorPercent = 50 + (clampedCents / 50) * 45;
 
+  // Ángulo de la aguja: de -60° (-50 cents) a +60° (+50 cents)
+  const centsValue = displayedResult?.cents ?? 0;
+  const needleAngle = Math.max(-60, Math.min(60, (centsValue / 50) * 60));
+
   return (
     <div
       id="lesson-tuner-section"
-      className="bg-white rounded-3xl border border-slate-200/80 shadow-xl shadow-indigo-100/30 overflow-hidden select-none"
+      className="bg-white rounded-[28px] border border-slate-200/90 shadow-2xs overflow-hidden select-none flex flex-col justify-between"
     >
       {/* Encabezado del Afinador */}
-      <div className="p-5 sm:p-6 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100">
+      <div className="p-4 sm:p-5 pb-3 flex items-center justify-between border-b border-slate-100">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shadow-md shadow-indigo-100 shrink-0">
+          <div className="w-10 h-10 rounded-full bg-[#E8F3F8] text-[#00537A] flex items-center justify-center shrink-0">
             <Mic className="w-5 h-5" />
           </div>
-          <div>
-            <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-              <span>Afinador digital</span>
-              {isActive && (
-                <span className="flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Micrófono activo
-                </span>
-              )}
-            </h2>
-            <p className="text-xs text-slate-500">
-              Tocá una nota y MusicKids te ayudará a afinar tu instrumento.
-            </p>
-          </div>
+          <h2 className="text-base sm:text-lg font-bold text-slate-900">
+            Tuner
+          </h2>
         </div>
 
-        {/* Botón Desactivar afinador en encabezado si está activo */}
-        {isActive && (
-          <button
-            id="btn-tuner-deactivate-header"
-            type="button"
-            aria-label="Desactivar afinador"
-            onClick={stopTuner}
-            className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-600 text-xs font-bold transition cursor-pointer self-start sm:self-auto"
-          >
-            <MicOff className="w-4 h-4" />
-            <span>Desactivar afinador</span>
-          </button>
-        )}
+        {/* Estado y botón de activación rápida */}
+        <div>
+          {isActive ? (
+            <button
+              id="btn-tuner-deactivate-header"
+              type="button"
+              aria-label="Desactivar micrófono del afinador"
+              onClick={stopTuner}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-semibold transition cursor-pointer"
+            >
+              <MicOff className="w-3.5 h-3.5" />
+              <span>Detener</span>
+            </button>
+          ) : (
+            <button
+              id="btn-tuner-activate-header"
+              type="button"
+              aria-label="Activar afinador"
+              onClick={startTuner}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#E8F3F8] hover:bg-indigo-50 text-[#00537A] text-xs font-semibold transition cursor-pointer"
+            >
+              <Mic className="w-3.5 h-3.5" />
+              <span>Activar</span>
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Contenido Principal */}
-      <div className="p-6 sm:p-10 bg-slate-50/60 flex flex-col items-center justify-center min-h-[260px]">
-        {/* Mensaje de Error Amigable */}
+      {/* Contenido Principal: Medidor de Aguja Radial estilo Mockup */}
+      <div className="p-5 sm:p-6 flex flex-col items-center justify-center flex-1">
         {errorMessage && (
           <div
             id="tuner-error-alert"
-            className="w-full max-w-md mb-6 p-4 rounded-2xl bg-rose-50 border border-rose-200 flex items-center gap-3 text-rose-700 text-xs sm:text-sm font-semibold"
+            className="w-full mb-3 p-2.5 rounded-xl bg-rose-50 border border-rose-200 flex items-center gap-2 text-rose-700 text-xs font-semibold"
           >
-            <AlertCircle className="w-5 h-5 shrink-0 text-rose-500" />
+            <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
             <span>{errorMessage}</span>
           </div>
         )}
 
-        {/* Estado 1: Desactivado */}
-        {!isActive ? (
-          <div className="flex flex-col items-center text-center max-w-sm gap-4 py-4">
-            <div className="w-16 h-16 rounded-3xl bg-indigo-100/70 text-indigo-600 flex items-center justify-center shadow-inner">
-              <Mic className="w-8 h-8" />
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-slate-800">
-                Afiná tu instrumento
-              </h3>
-              <p className="text-xs sm:text-sm text-slate-500 mt-1">
-                Presioná el botón para permitir el uso del micrófono y detectar la nota en tiempo real.
-              </p>
-            </div>
-            <button
-              id="btn-tuner-activate"
-              type="button"
-              aria-label="Activar afinador"
-              onClick={startTuner}
-              className="w-full max-w-[240px] h-14 rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-extrabold text-base shadow-lg shadow-indigo-200 ring-4 ring-indigo-100 flex items-center justify-center gap-2.5 transition cursor-pointer mt-2"
+        {/* Dial de Aguja Semicircular */}
+        <div className="relative w-full max-w-[240px] flex flex-col items-center">
+          <svg
+            viewBox="0 0 200 115"
+            className="w-full overflow-visible select-none"
+          >
+            {/* Arco base */}
+            <path
+              d="M 25 105 A 75 75 0 0 1 175 105"
+              fill="none"
+              stroke="#E2E8F0"
+              strokeWidth="4"
+              strokeLinecap="round"
+            />
+
+            {/* Zona afinada central verde */}
+            <path
+              d="M 88 32 A 75 75 0 0 1 112 32"
+              fill="none"
+              stroke="#10B981"
+              strokeWidth="5"
+              strokeLinecap="round"
+            />
+
+            {/* Ticks de calibración */}
+            {/* -50 */}
+            <line x1="28" y1="98" x2="38" y2="92" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round" />
+            {/* -25 */}
+            <line x1="56" y1="56" x2="63" y2="63" stroke="#CBD5E1" strokeWidth="1.5" strokeLinecap="round" />
+            {/* 0 centro */}
+            <line x1="100" y1="24" x2="100" y2="34" stroke="#10B981" strokeWidth="2.5" strokeLinecap="round" />
+            {/* +25 */}
+            <line x1="144" y1="56" x2="137" y2="63" stroke="#CBD5E1" strokeWidth="1.5" strokeLinecap="round" />
+            {/* +50 */}
+            <line x1="172" y1="98" x2="162" y2="92" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round" />
+
+            {/* Etiquetas de valores */}
+            <text x="22" y="112" fill="#94A3B8" fontSize="10" fontWeight="bold" textAnchor="middle">-50</text>
+            <text x="100" y="18" fill="#10B981" fontSize="11" fontWeight="bold" textAnchor="middle">0</text>
+            <text x="178" y="112" fill="#94A3B8" fontSize="10" fontWeight="bold" textAnchor="middle">+50</text>
+
+            {/* Aguja dinámica */}
+            <g
+              transform={`rotate(${isActive ? needleAngle : 0}, 100, 105)`}
+              className="transition-transform duration-100 ease-out origin-[100px_105px]"
             >
-              <Mic className="w-5 h-5" />
-              <span>Activar afinador</span>
-            </button>
-          </div>
-        ) : (
-          /* Estado 2: Activo escuchando o mostrando la última medición congelada */
-          <div className="w-full max-w-md flex flex-col items-center gap-6">
-            {/* Nota Detectada y Frecuencia (Permanecen visibles y congeladas) */}
-            <div className="flex flex-col items-center text-center min-h-[110px] justify-center">
-              {displayedResult ? (
+              <line
+                x1="100"
+                y1="105"
+                x2="100"
+                y2="38"
+                stroke={
+                  !isActive
+                    ? '#94A3B8'
+                    : displayedResult?.inTune
+                    ? '#10B981'
+                    : '#F59E0B'
+                }
+                strokeWidth="3"
+                strokeLinecap="round"
+              />
+              <circle
+                cx="100"
+                cy="105"
+                r="6"
+                fill={
+                  !isActive
+                    ? '#94A3B8'
+                    : displayedResult?.inTune
+                    ? '#10B981'
+                    : '#F59E0B'
+                }
+              />
+            </g>
+          </svg>
+
+          {/* Nota Detectada y Frecuencia en el centro inferior */}
+          <div className="flex flex-col items-center justify-center -mt-2 min-h-[52px]">
+            {isActive ? (
+              displayedResult ? (
                 <>
                   <span
                     id="tuner-detected-note"
-                    className={`text-6xl sm:text-7xl font-black tracking-tight transition-colors duration-150 ${
+                    className={`text-3xl sm:text-4xl font-black tracking-tight ${
                       displayedResult.inTune
                         ? 'text-emerald-600'
-                        : 'text-amber-500'
+                        : 'text-slate-900'
                     }`}
                   >
                     {displayedResult.note}
                   </span>
                   <span
                     id="tuner-detected-freq"
-                    className="text-xs sm:text-sm font-bold text-slate-500 font-mono mt-1"
+                    className="text-xs font-semibold text-slate-400 font-mono"
                   >
                     {displayedResult.frequency} Hz
                   </span>
                 </>
               ) : (
-                <div className="flex flex-col items-center gap-2">
-                  <span className="text-2xl sm:text-3xl font-extrabold text-slate-400 animate-pulse">
-                    Tocá una nota...
-                  </span>
-                  <span className="text-xs text-slate-400">
-                    Acercá tu ukulele, guitarra o cantá cerca del micrófono
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Barra Visual de Afinación (-50 Cents a +50 Cents) */}
-            <div className="w-full flex flex-col gap-2">
-              <div className="flex justify-between text-[11px] font-extrabold text-slate-400 px-1">
-                <span>BAJO</span>
-                <span
-                  className={`font-black ${
-                    displayedResult?.inTune
-                      ? 'text-emerald-600'
-                      : 'text-slate-400'
-                  }`}
-                >
-                  AFINADO
+                <span className="text-xs font-semibold text-slate-400 animate-pulse">
+                  Tocá una nota...
                 </span>
-                <span>ALTO</span>
-              </div>
-
-              {/* Pista del medidor */}
-              <div className="relative w-full h-5 bg-slate-200 rounded-full overflow-visible flex items-center shadow-inner">
-                {/* Zona central verde (Afinado) */}
-                <div className="absolute left-1/2 -translate-x-1/2 w-12 h-full bg-emerald-100/90 rounded-full border border-emerald-300/50" />
-                {/* Línea de calibración central */}
-                <div className="absolute left-1/2 -translate-x-1/2 w-0.5 h-6 bg-slate-400 z-0" />
-
-                {/* Punto indicador de aguja: conserva la posición de afinación de la última medición */}
-                {displayedResult && (
-                  <div
-                    id="tuner-pitch-needle"
-                    className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-7 h-7 rounded-full shadow-md border-2 border-white transition-all duration-100 z-10 ${
-                      displayedResult.inTune
-                        ? 'bg-emerald-500 ring-4 ring-emerald-200'
-                        : 'bg-amber-500 ring-4 ring-amber-200'
-                    }`}
-                    style={{ left: `${indicatorPercent}%` }}
-                  />
-                )}
-              </div>
-            </div>
-
-            {/* Estado de afinación textual claro: conserva exactamente Bajo / Alto / Afinado */}
-            <div className="h-6 flex items-center justify-center">
-              {displayedResult ? (
-                displayedResult.inTune ? (
-                  <span className="flex items-center gap-1.5 text-sm font-extrabold text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200">
-                    <CheckCircle2 className="w-4 h-4" />
-                    ✓ Afinado
-                  </span>
-                ) : displayedResult.cents < 0 ? (
-                  <span className="text-xs font-bold text-amber-600 bg-amber-50 px-3 py-1 rounded-full border border-amber-200">
-                    Bajo ({displayedResult.cents} cents)
-                  </span>
-                ) : (
-                  <span className="text-xs font-bold text-amber-600 bg-amber-50 px-3 py-1 rounded-full border border-amber-200">
-                    Alto (+{displayedResult.cents} cents)
-                  </span>
-                )
-              ) : (
-                <span className="text-xs text-slate-400 font-medium">
-                  Esperando sonido...
-                </span>
-              )}
-            </div>
-
-            {/* Indicador secundario de espera de sonido cuando cesa la señal */}
-            {displayedResult && !hasAudioSignal && (
-              <span className="text-[11px] font-semibold text-slate-400 -mt-3">
-                Esperando sonido...
-              </span>
+              )
+            ) : (
+              <button
+                type="button"
+                onClick={startTuner}
+                className="text-xs font-bold text-[#4361EE] hover:underline cursor-pointer"
+              >
+                Toca para activar
+              </button>
             )}
-
-            {/* Botón Desactivar Afinador */}
-            <button
-              id="btn-tuner-deactivate"
-              type="button"
-              aria-label="Desactivar afinador"
-              onClick={stopTuner}
-              className="w-full max-w-[220px] h-12 rounded-2xl bg-slate-200 hover:bg-rose-100 text-slate-700 hover:text-rose-700 active:scale-95 font-extrabold text-sm transition cursor-pointer flex items-center justify-center gap-2 mt-2"
-            >
-              <MicOff className="w-4 h-4" />
-              <span>Desactivar afinador</span>
-            </button>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
