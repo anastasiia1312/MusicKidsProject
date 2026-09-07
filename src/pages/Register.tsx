@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import {
-  Music,
   User,
   Mail,
   Lock,
@@ -8,7 +7,6 @@ import {
   BookOpen,
   AlertCircle,
   Loader2,
-  CheckCircle2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getAuthErrorMessage } from '../services/authService';
@@ -44,7 +42,7 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
       return false;
     }
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const emailRegex = /^[^\s@]+@[^\s@]+$/;
     if (!emailRegex.test(email.trim())) {
       setErrorMessage('Ingresá un email válido.');
       return false;
@@ -127,97 +125,139 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
   return (
     <div
       id="register-page-container"
-      className="min-h-screen bg-[#F8FAFC] flex flex-col justify-between relative overflow-hidden font-sans"
+      className="min-h-screen bg-[#F0F4F8] flex flex-col justify-between relative overflow-x-hidden selection:bg-[#FFB800]/30 selection:text-[#00537A]"
     >
-      {/* Elementos ambientales geométricos */}
-      <div className="absolute top-12 left-12 w-48 h-48 bg-indigo-100/60 rounded-full blur-3xl pointer-events-none"></div>
-      <div className="absolute bottom-12 right-12 w-64 h-64 bg-orange-100/50 rounded-full blur-3xl pointer-events-none"></div>
+      {/* Elementos ambientales decorativos de fondo (exactos al mockup de Figma) */}
+      <div className="absolute inset-0 pointer-events-none select-none overflow-hidden z-0">
+        {/* Mancha amarilla suave abajo a la izquierda */}
+        <div className="absolute -bottom-24 -left-24 w-80 h-80 sm:w-96 sm:h-96 bg-[#FFE29A]/40 rounded-full blur-3xl pointer-events-none" />
 
-      {/* Header Geometric Balance */}
-      <header className="h-20 w-full border-b border-slate-200 bg-white flex items-center justify-between px-6 sm:px-12 shrink-0 z-10">
+        {/* Mancha azulada suave arriba a la derecha */}
+        <div className="absolute -top-24 -right-24 w-96 h-96 bg-[#D7E6F1]/50 rounded-full blur-3xl pointer-events-none" />
+
+        {/* Curvas decorativas amarillas en el fondo */}
+        <svg
+          className="absolute bottom-0 left-0 w-80 h-80 sm:w-96 sm:h-96 opacity-80 pointer-events-none"
+          viewBox="0 0 400 400"
+          fill="none"
+        >
+          <path
+            d="M -50 350 C 50 380, 100 300, 120 280 C 160 240, 80 180, 110 140 C 130 110, 180 130, 210 90"
+            stroke="#FAB816"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+          />
+        </svg>
+
+        <svg
+          className="absolute top-1/4 right-0 w-64 h-80 sm:w-72 sm:h-96 opacity-75 pointer-events-none"
+          viewBox="0 0 300 400"
+          fill="none"
+        >
+          <path
+            d="M 280 50 C 220 80, 180 150, 190 220 C 200 290, 270 320, 240 380"
+            stroke="#FAB816"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+          />
+        </svg>
+      </div>
+
+      {/* Header Geometric Balance (Idéntico a LandingPage) */}
+      <header
+        id="register-header"
+        className="w-full max-w-7xl mx-auto px-6 sm:px-10 lg:px-16 pt-8 pb-4 flex items-center justify-between shrink-0 relative z-10"
+      >
+        {/* Logotipo MusicKids */}
         <div
           id="navbar-brand"
-          className="flex items-center gap-3 cursor-pointer"
-          onClick={() => onNavigate('/login')}
+          className="flex items-center gap-1 cursor-pointer group select-none"
+          onClick={() => onNavigate('/')}
         >
-          <div className="w-10 h-10 bg-[#4F46E5] rounded-xl flex items-center justify-center shadow-lg shadow-indigo-100 text-white">
-            <Music className="w-5 h-5" />
-          </div>
-          <span className="text-2xl font-black tracking-tight text-slate-900">
-            MusicKids
+          <span
+            className="font-abril text-[28px] sm:text-[32px] text-[#00537A] tracking-normal leading-none"
+            style={{ fontFamily: "'Abril Fatface', cursive, serif" }}
+          >
+            Music
+          </span>
+          <img
+            src="/images/logo-clef.png"
+            alt="Clave de Sol MusicKids"
+            className="h-9 sm:h-11 w-auto object-contain -mx-0.5 -mt-1 select-none pointer-events-none transition-transform duration-200 group-hover:scale-105"
+            referrerPolicy="no-referrer"
+          />
+          <span
+            className="font-abril text-[28px] sm:text-[32px] text-[#00537A] tracking-normal leading-none"
+            style={{ fontFamily: "'Abril Fatface', cursive, serif" }}
+          >
+            Kids
           </span>
         </div>
-        <nav className="flex items-center gap-6 text-xs font-bold uppercase tracking-widest text-slate-400">
+
+        {/* Acciones de Navegación: "Iniciar sesión" + Botón "REGISTRO" */}
+        <div className="flex items-center gap-6 sm:gap-8">
           <button
+            type="button"
             onClick={() => onNavigate('/login')}
-            className="hover:text-indigo-600 transition-colors cursor-pointer"
+            className="text-sm font-semibold text-[#00537A] hover:text-[#003954] hover:underline cursor-pointer transition-colors"
           >
             Iniciar sesión
           </button>
-          <span className="text-indigo-600 font-extrabold border-b-2 border-indigo-600 pb-0.5">
-            Registro
-          </span>
-        </nav>
+          <button
+            type="button"
+            className="rounded-full bg-[#00537A] text-white text-xs sm:text-sm font-bold tracking-wider uppercase px-6 py-2.5 cursor-default select-none shadow-none"
+          >
+            REGISTRO
+          </button>
+        </div>
       </header>
 
-      {/* Contenido Principal con Card Dividida */}
-      <main className="flex-1 flex items-center justify-center p-4 sm:p-6 lg:p-8 z-10">
-        <div className="max-w-4xl w-full bg-white rounded-3xl shadow-2xl shadow-indigo-100/50 border border-slate-100 flex flex-col md:flex-row overflow-hidden my-auto">
-          {/* Panel Izquierdo: Hero Banner */}
-          <div className="w-full md:w-5/12 bg-[#4F46E5] p-8 sm:p-10 text-white flex flex-col justify-between relative overflow-hidden">
-            <div className="relative z-10">
-              <div className="w-12 h-12 bg-white/15 rounded-2xl flex items-center justify-center backdrop-blur-md mb-6 shadow-sm">
-                <Music className="w-6 h-6 text-white" />
-              </div>
-              <h2 className="text-2xl sm:text-3xl font-black tracking-tight leading-tight">
-                Únete a la academia MusicKids.
-              </h2>
-              <p className="text-indigo-100 text-sm mt-3 leading-relaxed">
-                La plataforma integral de clases particulares de música que une a profesores y alumnos con herramientas en tiempo real.
-              </p>
-            </div>
+      {/* Contenedor Principal: Card Dividida (Panel Izquierdo Azul + Panel Derecho Formulario) */}
+      <main className="flex-1 flex items-center justify-center px-4 sm:px-6 lg:px-8 py-6 sm:py-10 relative z-10">
+        <div className="max-w-4xl w-full bg-white rounded-[32px] sm:rounded-[36px] shadow-xl shadow-[#00537A]/10 border border-slate-100 flex flex-col lg:flex-row overflow-hidden my-auto">
+          {/* Panel Izquierdo: Azul Petróleo Oscuro (#00537A) Limpio */}
+          <div className="w-full lg:w-5/12 bg-[#00537A] p-8 sm:p-10 lg:p-12 text-white flex flex-col justify-center relative overflow-hidden shrink-0">
+            {/* Título: Únete a la academia MusicKids. ("MusicKids." en #FFB800) */}
+            <h2
+              className="font-parkinsans text-3xl sm:text-4xl lg:text-[40px] font-normal leading-[1.18] tracking-tight"
+              style={{ fontFamily: "'Parkinsans', sans-serif" }}
+            >
+              <span className="block text-white">Únete a la</span>
+              <span className="block text-white">academia</span>
+              <span className="block text-[#FFB800] font-normal">MusicKids.</span>
+            </h2>
 
-            <div className="relative z-10 mt-8 space-y-3">
-              <div className="bg-indigo-500/30 p-3.5 rounded-2xl backdrop-blur-sm flex items-center gap-3">
-                <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
-                  <GraduationCap className="w-4 h-4 text-white" />
-                </div>
-                <div>
-                  <h4 className="font-bold text-xs">Profesores y Alumnos</h4>
-                  <p className="text-[11px] text-indigo-100">Perfiles personalizados según tu rol</p>
-                </div>
-              </div>
-
-              <div className="bg-indigo-500/30 p-3.5 rounded-2xl backdrop-blur-sm flex items-center gap-3">
-                <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
-                  <CheckCircle2 className="w-4 h-4 text-white" />
-                </div>
-                <div>
-                  <h4 className="font-bold text-xs">Seguridad Firebase</h4>
-                  <p className="text-[11px] text-indigo-100">Autenticación y base de datos segura</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="absolute -right-12 -bottom-12 w-48 h-48 bg-indigo-400/20 rounded-full blur-2xl pointer-events-none"></div>
+            {/* Texto Descriptivo Inferior */}
+            <p
+              className="font-siemreap text-white/95 text-sm sm:text-base mt-6 sm:mt-8 leading-relaxed max-w-sm"
+              style={{ fontFamily: "'Siemreap', sans-serif" }}
+            >
+              La plataforma integral de clases particulares de música que une a profesores y alumnos con herramientas en tiempo real.
+            </p>
           </div>
 
-          {/* Panel Derecho: Formulario */}
-          <div className="w-full md:w-7/12 p-6 sm:p-10 bg-white flex flex-col justify-center">
+          {/* Panel Derecho: Formulario de Registro sobre Fondo Blanco */}
+          <div className="w-full lg:w-7/12 p-6 sm:p-10 lg:p-12 bg-white flex flex-col justify-center">
             <div className="mb-6">
-              <h3 className="text-2xl font-black text-slate-900 tracking-tight">
+              <h3
+                className="font-parkinsans text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight"
+                style={{ fontFamily: "'Parkinsans', sans-serif" }}
+              >
                 Crear una cuenta
               </h3>
-              <p className="text-slate-500 text-sm mt-1">
-                Completa tus datos para ingresar a MusicKids
+              <p
+                className="font-siemreap text-slate-500 text-sm sm:text-base mt-1"
+                style={{ fontFamily: "'Siemreap', sans-serif" }}
+              >
+                Completa tus datos para ingresar a MusicKids.
               </p>
             </div>
 
-            {/* Mensaje de Error */}
+            {/* Mensaje de Error si ocurre */}
             {errorMessage && (
               <div
                 id="register-error-alert"
-                className="mb-5 p-3.5 bg-rose-50 border border-rose-200/80 rounded-2xl flex items-start gap-3 text-rose-700 text-sm"
+                className="mb-5 p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-3 text-rose-700 text-sm"
               >
                 <AlertCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
                 <span className="leading-snug">{errorMessage}</span>
@@ -225,13 +265,13 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
             )}
 
             <form id="register-form" onSubmit={handleEmailSubmit} className="space-y-4">
-              {/* Campo Nombre */}
+              {/* Campo Nombre Completo */}
               <div>
                 <label
                   htmlFor="register-name"
-                  className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5"
+                  className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5"
                 >
-                  Nombre completo
+                  NOMBRE COMPLETO
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -247,18 +287,18 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
                     }}
                     placeholder="Ej. María López"
                     disabled={isSubmitting || isGoogleSubmitting}
-                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all text-slate-800 text-sm"
+                    className="w-full pl-10 pr-4 py-2.5 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl focus:bg-white focus:ring-2 focus:ring-[#00537A]/30 focus:border-[#00537A] outline-none transition-all text-slate-800 text-sm placeholder:text-slate-400"
                   />
                 </div>
               </div>
 
-              {/* Campo Email */}
+              {/* Campo Correo Electrónico */}
               <div>
                 <label
                   htmlFor="register-email"
-                  className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5"
+                  className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5"
                 >
-                  Correo electrónico
+                  CORREO ELECTRÓNICO
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -274,7 +314,7 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
                     }}
                     placeholder="tu@email.com"
                     disabled={isSubmitting || isGoogleSubmitting}
-                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all text-slate-800 text-sm"
+                    className="w-full pl-10 pr-4 py-2.5 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl focus:bg-white focus:ring-2 focus:ring-[#00537A]/30 focus:border-[#00537A] outline-none transition-all text-slate-800 text-sm placeholder:text-slate-400"
                   />
                 </div>
               </div>
@@ -284,9 +324,9 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
                 <div>
                   <label
                     htmlFor="register-password"
-                    className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5"
+                    className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5"
                   >
-                    Contraseña
+                    CONTRASEÑA
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -302,7 +342,7 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
                       }}
                       placeholder="Mín. 6 caracteres"
                       disabled={isSubmitting || isGoogleSubmitting}
-                      className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all text-slate-800 text-sm"
+                      className="w-full pl-10 pr-3.5 py-2.5 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl focus:bg-white focus:ring-2 focus:ring-[#00537A]/30 focus:border-[#00537A] outline-none transition-all text-slate-800 text-sm placeholder:text-slate-400"
                     />
                   </div>
                 </div>
@@ -310,9 +350,9 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
                 <div>
                   <label
                     htmlFor="register-confirm-password"
-                    className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5"
+                    className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5"
                   >
-                    Confirmar
+                    CONFIRMAR
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -328,16 +368,16 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
                       }}
                       placeholder="Repite contraseña"
                       disabled={isSubmitting || isGoogleSubmitting}
-                      className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all text-slate-800 text-sm"
+                      className="w-full pl-10 pr-3.5 py-2.5 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl focus:bg-white focus:ring-2 focus:ring-[#00537A]/30 focus:border-[#00537A] outline-none transition-all text-slate-800 text-sm placeholder:text-slate-400"
                     />
                   </div>
                 </div>
               </div>
 
-              {/* Selección de Rol */}
+              {/* Selección de Rol: Alumno / Profesor */}
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
-                  Selecciona tu rol
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-2">
+                  SELECCIONA TU ROL
                 </label>
                 <div className="grid grid-cols-2 gap-3">
                   {/* Opción Alumno */}
@@ -349,30 +389,29 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
                       if (errorMessage) setErrorMessage(null);
                     }}
                     disabled={isSubmitting || isGoogleSubmitting}
-                    className={`p-3 rounded-2xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                    className={`p-3.5 rounded-2xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
                       role === 'student'
-                        ? 'border-indigo-600 bg-indigo-50/60 ring-2 ring-indigo-500/40 text-indigo-950 shadow-sm'
-                        : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 hover:border-slate-300'
+                        ? 'border-[#00537A] bg-[#00537A]/5 ring-1 ring-[#00537A]/30 text-[#00537A] shadow-xs'
+                        : 'border-[#E2E8F0] bg-[#F8FAFC] text-slate-700 hover:bg-slate-100/70 hover:border-slate-300'
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center justify-between mb-2">
                       <div
-                        className={`w-7 h-7 rounded-xl flex items-center justify-center ${
+                        className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
                           role === 'student'
-                            ? 'bg-[#4F46E5] text-white'
-                            : 'bg-slate-200 text-slate-600'
+                            ? 'bg-[#00537A] text-white'
+                            : 'bg-slate-200/80 text-slate-600'
                         }`}
                       >
-                        <BookOpen className="w-3.5 h-3.5" />
+                        <BookOpen className="w-4 h-4" />
                       </div>
-                      {role === 'student' && (
-                        <CheckCircle2 className="w-4 h-4 text-indigo-600" />
-                      )}
                     </div>
-                    <span className="font-bold text-xs sm:text-sm">Alumno</span>
-                    <span className="text-[10px] text-slate-500 leading-tight">
-                      Aprender música
-                    </span>
+                    <div>
+                      <div className="font-bold text-sm text-slate-900">Alumno</div>
+                      <div className="text-xs text-slate-500 leading-tight mt-0.5">
+                        Aprender música
+                      </div>
+                    </div>
                   </button>
 
                   {/* Opción Profesor */}
@@ -384,45 +423,44 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
                       if (errorMessage) setErrorMessage(null);
                     }}
                     disabled={isSubmitting || isGoogleSubmitting}
-                    className={`p-3 rounded-2xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                    className={`p-3.5 rounded-2xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
                       role === 'teacher'
-                        ? 'border-indigo-600 bg-indigo-50/60 ring-2 ring-indigo-500/40 text-indigo-950 shadow-sm'
-                        : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 hover:border-slate-300'
+                        ? 'border-[#00537A] bg-[#00537A]/5 ring-1 ring-[#00537A]/30 text-[#00537A] shadow-xs'
+                        : 'border-[#E2E8F0] bg-[#F8FAFC] text-slate-700 hover:bg-slate-100/70 hover:border-slate-300'
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center justify-between mb-2">
                       <div
-                        className={`w-7 h-7 rounded-xl flex items-center justify-center ${
+                        className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
                           role === 'teacher'
-                            ? 'bg-[#4F46E5] text-white'
-                            : 'bg-slate-200 text-slate-600'
+                            ? 'bg-[#00537A] text-white'
+                            : 'bg-slate-200/80 text-slate-600'
                         }`}
                       >
-                        <GraduationCap className="w-3.5 h-3.5" />
+                        <GraduationCap className="w-4 h-4" />
                       </div>
-                      {role === 'teacher' && (
-                        <CheckCircle2 className="w-4 h-4 text-indigo-600" />
-                      )}
                     </div>
-                    <span className="font-bold text-xs sm:text-sm">Profesor</span>
-                    <span className="text-[10px] text-slate-500 leading-tight">
-                      Impartir clases
-                    </span>
+                    <div>
+                      <div className="font-bold text-sm text-slate-900">Profesor</div>
+                      <div className="text-xs text-slate-500 leading-tight mt-0.5">
+                        Impartir clases
+                      </div>
+                    </div>
                   </button>
                 </div>
               </div>
 
-              {/* Botón Crear Cuenta */}
+              {/* Botón Crear cuenta */}
               <div className="pt-2">
                 <button
                   type="submit"
                   id="submit-register-btn"
                   disabled={isSubmitting || isGoogleSubmitting}
-                  className="w-full py-3.5 bg-[#4F46E5] hover:bg-indigo-700 text-white font-bold rounded-xl shadow-lg shadow-indigo-200 transition-all active:scale-[0.98] disabled:opacity-50 cursor-pointer text-sm flex items-center justify-center gap-2"
+                  className="w-full py-3.5 bg-[#00537A] hover:bg-[#004262] text-white font-bold rounded-xl shadow-sm transition-all active:scale-[0.99] disabled:opacity-50 cursor-pointer text-sm sm:text-base flex items-center justify-center gap-2"
                 >
                   {isSubmitting ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
                       <span>Creando cuenta...</span>
                     </>
                   ) : (
@@ -432,10 +470,10 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
               </div>
             </form>
 
-            {/* Separador */}
+            {/* Separador "O" */}
             <div className="my-4 flex items-center">
               <div className="flex-1 border-t border-slate-200"></div>
-              <span className="px-3 text-xs font-semibold uppercase text-slate-400">
+              <span className="px-3 text-xs font-semibold text-slate-400">
                 o
               </span>
               <div className="flex-1 border-t border-slate-200"></div>
@@ -447,11 +485,11 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
               id="register-google-btn"
               onClick={handleGoogleClick}
               disabled={isSubmitting || isGoogleSubmitting}
-              className="w-full py-3 border border-slate-200 rounded-xl flex items-center justify-center gap-3 hover:bg-slate-50 transition-colors font-semibold text-slate-700 text-sm shadow-xs disabled:opacity-50 cursor-pointer"
+              className="w-full py-3 bg-white border border-slate-200 rounded-xl flex items-center justify-center gap-3 hover:bg-slate-50 transition-colors font-semibold text-slate-700 text-sm shadow-2xs disabled:opacity-50 cursor-pointer"
             >
               {isGoogleSubmitting ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
+                  <Loader2 className="w-4 h-4 animate-spin text-[#00537A]" />
                   <span>Conectando con Google...</span>
                 </>
               ) : (
@@ -486,7 +524,7 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
                 type="button"
                 id="go-to-login-btn"
                 onClick={() => onNavigate('/login')}
-                className="font-bold text-indigo-600 hover:text-indigo-700 hover:underline cursor-pointer"
+                className="font-bold text-[#00537A] hover:underline cursor-pointer"
               >
                 Iniciar sesión
               </button>
@@ -495,10 +533,8 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
         </div>
       </main>
 
-      {/* Footer Geometric Balance */}
-      <footer className="h-12 w-full bg-white border-t border-slate-100 flex items-center justify-center text-[10px] uppercase tracking-[0.2em] font-bold text-slate-400 shrink-0">
-        © 2024 MusicKids Academy • Proyecto Firebase ID: musickids-83026
-      </footer>
+      {/* Espaciado inferior de balance */}
+      <footer className="w-full py-3 shrink-0" />
     </div>
   );
 };
