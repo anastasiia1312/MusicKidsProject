@@ -9,7 +9,7 @@ import {
   Plus,
   Music,
   User,
-  Settings,
+  ArrowRight,
   Megaphone,
   Bell,
   Menu,
@@ -476,17 +476,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
                     </div>
                   </div>
 
-                  {/* Lado Derecho: Icono de Configuración + Botón "Unirse a la clase" */}
-                  <div className="flex items-center sm:flex-col sm:items-end justify-between sm:justify-center gap-4 shrink-0 pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-100">
-                    {/* Icono de Configuración (visual como en el mockup) */}
-                    <button
-                      type="button"
-                      className="text-slate-400 hover:text-slate-600 transition-colors p-1 rounded-lg cursor-default"
-                      title="Configuración de clase"
-                    >
-                      <Settings className="w-5 h-5 stroke-[1.8]" />
-                    </button>
-
+                  {/* Lado Derecho: Acceso a la clase (Unirse a la clase y Aula virtual) */}
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2.5 shrink-0 pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-100">
                     {/* Botón "Unirse a la clase" (#00537A) */}
                     <a
                       id={`btn-join-lesson-${lesson.id}`}
@@ -503,6 +494,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
                     >
                       Unirse a la clase
                     </a>
+
+                    {/* Botón Aula Virtual */}
+                    <button
+                      id={`btn-view-lesson-${lesson.id}`}
+                      type="button"
+                      onClick={() => onNavigate(`/lesson/${lesson.id}`)}
+                      className="bg-slate-100 hover:bg-slate-200 text-slate-800 active:scale-95 font-semibold text-sm sm:text-base px-5 sm:px-6 py-2.5 rounded-full shadow-2xs transition-all cursor-pointer whitespace-nowrap text-center flex items-center justify-center gap-1.5"
+                    >
+                      <span>Aula virtual</span>
+                      <ArrowRight className="w-4 h-4 shrink-0" />
+                    </button>
                   </div>
                 </div>
               ))}
