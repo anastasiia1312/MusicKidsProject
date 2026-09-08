@@ -1,0 +1,29 @@
+rules_version = '2';
+
+// Reglas de seguridad para Firebase Storage de MusicKids
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Reglas para la carpeta de avatares de usuario
+    // Ruta: avatars/{userId}/{fileName}
+    match /avatars/{userId}/{fileName} {
+      
+      // Lectura: Cualquier usuario autenticado puede visualizar avatares
+      // (Permite que alumnos vean avatares de profesores y profesores de alumnos)
+      allow read: if request.auth != null;
+
+      // Escritura: Solo el usuario autenticado dueño de su carpeta puede subir/modificar su avatar
+      // Validaciones de seguridad:
+      // 1. request.auth != null (autenticado)
+      // 2. request.auth.uid == userId (dueño de la carpeta correspondiente)
+      // 3. Tamaño máximo de archivo: 5 MB (5 * 1024 * 1024 = 5242880 bytes)
+      // 4. Formatos de imagen permitidos: JPEG, PNG o WebP
+      allow write: if request.auth != null
+                   && request.auth.uid == userId
+                   && request.resource.size <= 5 * 1024 * 1024
+                   && (request.resource.contentType == 'image/jpeg' ||
+                       request.resource.contentType == 'image/png' ||
+                       request.resource.contentType == 'image/webp');
+    }
+  }
+}

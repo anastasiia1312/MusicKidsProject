@@ -10,6 +10,7 @@ import {
   doc,
   getDoc,
   setDoc,
+  updateDoc,
   serverTimestamp,
 } from 'firebase/firestore';
 import { auth, db, googleProvider } from './firebase';
@@ -144,6 +145,62 @@ export async function fetchUserProfile(uid: string): Promise<UserProfile | null>
     return null;
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, path);
+  }
+}
+
+export interface TeacherProfileUpdateInput {
+  birthDate?: string;
+  instruments?: string[];
+  education?: string;
+  bio?: string;
+}
+
+export interface StudentProfileUpdateInput {
+  birthDate?: string;
+  bio?: string;
+}
+
+/**
+ * Actualiza exclusivamente los campos del perfil del profesor en 'users/{uid}'
+ * utilizando updateDoc para preservar todos los demás campos existentes.
+ */
+export async function updateTeacherProfileService(
+  uid: string,
+  data: TeacherProfileUpdateInput
+): Promise<void> {
+  const path = `users/${uid}`;
+  try {
+    const userDocRef = doc(db, 'users', uid);
+    await updateDoc(userDocRef, {
+      birthDate: data.birthDate?.trim() ?? '',
+      instruments: Array.isArray(data.instruments) ? data.instruments : [],
+      education: data.education?.trim() ?? '',
+      bio: data.bio?.trim() ?? '',
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+/**
+ * Actualiza exclusivamente los campos del perfil del alumno en 'users/{uid}'
+ * utilizando updateDoc para preservar todos los demás campos existentes.
+ */
+export async function updateStudentProfileService(
+  uid: string,
+  data: StudentProfileUpdateInput
+): Promise<void> {
+  const path = `users/${uid}`;
+  try {
+    const userDocRef = doc(db, 'users', uid);
+    await updateDoc(userDocRef, {
+      birthDate: data.birthDate?.trim() ?? '',
+      bio: data.bio?.trim() ?? '',
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
   }
 }
 

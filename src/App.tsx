@@ -5,9 +5,12 @@ import { Login } from './pages/Login';
 import { SelectRole } from './pages/SelectRole';
 import { TeacherDashboard } from './pages/teacher/TeacherDashboard';
 import { CreateLesson } from './pages/teacher/CreateLesson';
+import { TeacherProfile } from './pages/teacher/TeacherProfile';
 import { StudentDashboard } from './pages/student/StudentDashboard';
 import { LessonPage } from './pages/LessonPage';
 import { LandingPage } from './pages/LandingPage';
+import { PublicTeacherProfile } from './pages/teacher/PublicTeacherProfile';
+import { PublicStudentProfile } from './pages/student/PublicStudentProfile';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { RoleRoute } from './components/RoleRoute';
 import { LoadingScreen } from './components/common/LoadingScreen';
@@ -25,8 +28,13 @@ function AppContent() {
       pathname === '/select-role' ||
       pathname === '/teacher/dashboard' ||
       pathname === '/teacher/lessons/new' ||
+      pathname === '/teacher/profile' ||
+      pathname === '/student/profile' ||
+      pathname === '/profile' ||
       pathname === '/student/dashboard' ||
-      pathname.startsWith('/lesson/')
+      pathname.startsWith('/lesson/') ||
+      pathname.startsWith('/teacher/') ||
+      pathname.startsWith('/student/')
     ) {
       return pathname;
     }
@@ -86,8 +94,13 @@ function AppContent() {
       if (
         currentPath === '/teacher/dashboard' ||
         currentPath === '/teacher/lessons/new' ||
+        currentPath === '/teacher/profile' ||
+        currentPath === '/student/profile' ||
+        currentPath === '/profile' ||
         currentPath === '/student/dashboard' ||
         currentPath.startsWith('/lesson/') ||
+        currentPath.startsWith('/teacher/') ||
+        currentPath.startsWith('/student/') ||
         currentPath === '/select-role'
       ) {
         navigate('/login');
@@ -105,6 +118,35 @@ function AppContent() {
     return (
       <ProtectedRoute onRedirect={navigate}>
         <LessonPage lessonId={lessonId} onNavigate={navigate} />
+      </ProtectedRoute>
+    );
+  }
+
+  // Renderizar perfil público del profesor para el alumno: /teacher/:teacherId
+  if (
+    currentPath.startsWith('/teacher/') &&
+    currentPath !== '/teacher/dashboard' &&
+    currentPath !== '/teacher/lessons/new' &&
+    currentPath !== '/teacher/profile'
+  ) {
+    const teacherId = currentPath.replace('/teacher/', '').split('/')[0];
+    return (
+      <ProtectedRoute onRedirect={navigate}>
+        <PublicTeacherProfile teacherId={teacherId} onNavigate={navigate} />
+      </ProtectedRoute>
+    );
+  }
+
+  // Renderizar perfil del alumno en modo solo lectura para el profesor: /student/:studentId
+  if (
+    currentPath.startsWith('/student/') &&
+    currentPath !== '/student/dashboard' &&
+    currentPath !== '/student/profile'
+  ) {
+    const studentId = currentPath.replace('/student/', '').split('/')[0];
+    return (
+      <ProtectedRoute onRedirect={navigate}>
+        <PublicStudentProfile studentId={studentId} onNavigate={navigate} />
       </ProtectedRoute>
     );
   }
@@ -131,6 +173,34 @@ function AppContent() {
       return (
         <RoleRoute allowedRole="teacher" onRedirect={navigate}>
           <CreateLesson onNavigate={navigate} />
+        </RoleRoute>
+      );
+
+    case '/teacher/profile':
+      return (
+        <RoleRoute allowedRole="teacher" onRedirect={navigate}>
+          <TeacherProfile onNavigate={navigate} />
+        </RoleRoute>
+      );
+
+    case '/student/profile':
+      return (
+        <RoleRoute allowedRole="student" onRedirect={navigate}>
+          <TeacherProfile onNavigate={navigate} />
+        </RoleRoute>
+      );
+
+    case '/profile':
+      if (role === 'teacher') {
+        return (
+          <RoleRoute allowedRole="teacher" onRedirect={navigate}>
+            <TeacherProfile onNavigate={navigate} />
+          </RoleRoute>
+        );
+      }
+      return (
+        <RoleRoute allowedRole="student" onRedirect={navigate}>
+          <TeacherProfile onNavigate={navigate} />
         </RoleRoute>
       );
 

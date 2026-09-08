@@ -72,24 +72,15 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate }) => {
             )}
           </div>
 
-          {/* Avatar & Nombre */}
+          {/* Avatar & Nombre (Carga temporalmente desactivada) */}
           <div className="flex items-center gap-2.5 bg-slate-50 border border-slate-200/80 rounded-xl pl-1.5 pr-3 py-1">
-            {userProfile.photoURL ? (
-              <img
-                id="user-avatar-img"
-                src={userProfile.photoURL}
-                alt={userProfile.name}
-                className="w-7 h-7 rounded-lg object-cover border border-indigo-200"
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              <div
-                id="user-avatar-fallback"
-                className="w-7 h-7 rounded-lg bg-[#4F46E5] text-white flex items-center justify-center text-xs font-bold"
-              >
-                {userProfile.name ? userProfile.name.charAt(0).toUpperCase() : <User className="w-3.5 h-3.5" />}
-              </div>
-            )}
+            {/* TODO: Rehabilitar carga de avatar en una iteración futura. */}
+            <div
+              id="user-avatar-fallback"
+              className="w-7 h-7 rounded-lg bg-[#00537A] text-white flex items-center justify-center text-xs font-bold"
+            >
+              {userProfile.name ? userProfile.name.charAt(0).toUpperCase() : <User className="w-3.5 h-3.5" />}
+            </div>
             <span id="user-display-name" className="text-xs sm:text-sm font-semibold text-slate-700 max-w-[120px] sm:max-w-[160px] truncate">
               {userProfile.name || 'Usuario'}
             </span>
