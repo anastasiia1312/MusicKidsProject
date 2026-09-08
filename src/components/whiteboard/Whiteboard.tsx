@@ -216,8 +216,17 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
    * Re-dibuja todos los trazos almacenados sobre el canvas en memoria
    */
   const redrawDrawingCanvas = useCallback((strokes: WhiteboardStroke[]) => {
-    const dCanvas = drawingCanvasRef.current;
-    if (!dCanvas || dCanvas.width === 0 || dCanvas.height === 0) return;
+    let dCanvas = drawingCanvasRef.current;
+    if (!dCanvas) {
+      dCanvas = document.createElement('canvas');
+      drawingCanvasRef.current = dCanvas;
+    }
+    const canvas = canvasRef.current;
+    if (canvas && (dCanvas.width !== canvas.width || dCanvas.height !== canvas.height)) {
+      dCanvas.width = canvas.width;
+      dCanvas.height = canvas.height;
+    }
+    if (dCanvas.width === 0 || dCanvas.height === 0) return;
     const dctx = dCanvas.getContext('2d');
     if (!dctx) return;
 
@@ -411,6 +420,26 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
     };
   }, [lessonId, redrawDrawingCanvas, renderComposite]);
 
+  /**
+   * Eliminar la plantilla seleccionada y sincronizar en Firestore
+   */
+  const handleDeleteSelectedTemplate = useCallback(async () => {
+    const targetId = selectedTemplateIdRef.current;
+    if (!targetId) return;
+    const updated = templatesRef.current.filter((t) => t.id !== targetId);
+    templatesRef.current = updated;
+    setTemplates(updated);
+    setSelectedTemplateId(null);
+
+    if (lessonId) {
+      try {
+        await saveTemplates(lessonId, updated);
+      } catch (err) {
+        console.error('[Whiteboard realtime] error: al eliminar plantilla seleccionada:', err);
+      }
+    }
+  }, [lessonId]);
+
   // Soporte de tecla Delete / Backspace para borrar la plantilla seleccionada
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -433,7 +462,7 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [lessonId]);
+  }, [lessonId, handleDeleteSelectedTemplate]);
 
   /**
    * Obtiene las coordenadas precisas del puntero en el sistema de coordenadas lógicas
@@ -706,7 +735,7 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
 
       if (wasModifying && lessonId) {
         saveTemplates(lessonId, templatesRef.current).catch((err) => {
-          console.error('Error al guardar posición de plantilla:', err);
+          console.error('[Whiteboard realtime] error: al guardar posición de plantilla:', err);
         });
       }
       return;
@@ -733,7 +762,7 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
 
       if (lessonId) {
         saveStroke(lessonId, strokeToSave).catch((err) => {
-          console.error('Error al guardar trazo en Firestore:', err);
+          console.error('[Whiteboard realtime] error: al guardar trazo en Firestore:', err);
         });
       }
     }
@@ -793,28 +822,7 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
       try {
         await saveTemplates(lessonId, updated);
       } catch (err) {
-        console.error('Error al guardar nueva plantilla:', err);
-      }
-    }
-  };
-
-  /**
-   * Eliminar la plantilla seleccionada y sincronizar en Firestore
-   */
-  const handleDeleteSelectedTemplate = async () => {
-    if (!selectedTemplateId) return;
-    const updated = templatesRef.current.filter(
-      (t) => t.id !== selectedTemplateId
-    );
-    templatesRef.current = updated;
-    setTemplates(updated);
-    setSelectedTemplateId(null);
-
-    if (lessonId) {
-      try {
-        await saveTemplates(lessonId, updated);
-      } catch (err) {
-        console.error('Error al eliminar plantilla seleccionada:', err);
+        console.error('[Whiteboard realtime] error: al guardar nueva plantilla:', err);
       }
     }
   };
@@ -831,7 +839,7 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
       try {
         await saveTemplates(lessonId, []);
       } catch (err) {
-        console.error('Error al limpiar plantillas:', err);
+        console.error('[Whiteboard realtime] error: al limpiar plantillas:', err);
       }
     }
   };
@@ -866,7 +874,7 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
       try {
         await clearWhiteboard(lessonId);
       } catch (err) {
-        console.error('Error al limpiar pizarra en Firestore:', err);
+        console.error('[Whiteboard realtime] error: al limpiar pizarra en Firestore:', err);
       }
     }
   };

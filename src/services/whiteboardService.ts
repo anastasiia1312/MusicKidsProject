@@ -6,7 +6,6 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { handleFirestoreError, OperationType } from './authService';
 import type {
   WhiteboardStroke,
   MusicTemplate,
@@ -22,6 +21,9 @@ export function subscribeToWhiteboard(
   onUpdate: (data: WhiteboardData) => void
 ): () => void {
   const path = `lessons/${lessonId}/whiteboard/state`;
+  console.log('[Whiteboard realtime] lessonId:', lessonId);
+  console.log('[Whiteboard realtime] subscribe:', path);
+
   const docRef = doc(db, 'lessons', lessonId, 'whiteboard', 'state');
 
   const unsubscribe = onSnapshot(
@@ -29,12 +31,17 @@ export function subscribeToWhiteboard(
     (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
+        const strokes = Array.isArray(data?.strokes) ? data.strokes : [];
+        const templates = Array.isArray(data?.templates) ? data.templates : [];
+        console.log(
+          `[Whiteboard realtime] snapshot: ${strokes.length} trazos y ${templates.length} plantillas`
+        );
         onUpdate({
-          strokes: Array.isArray(data?.strokes) ? data.strokes : [],
-          templates: Array.isArray(data?.templates) ? data.templates : [],
+          strokes,
+          templates,
         });
       } else {
-        // Pizarra vacía si todavía no existe el documento para esta clase
+        console.log('[Whiteboard realtime] snapshot: 0 trazos y 0 plantillas (nuevo doc)');
         onUpdate({
           strokes: [],
           templates: [],
@@ -42,7 +49,7 @@ export function subscribeToWhiteboard(
       }
     },
     (error) => {
-      handleFirestoreError(error, OperationType.GET, path);
+      console.error('[Whiteboard realtime] error:', error);
     }
   );
 
@@ -58,6 +65,7 @@ export async function saveStroke(
   stroke: WhiteboardStroke
 ): Promise<void> {
   const path = `lessons/${lessonId}/whiteboard/state`;
+  console.log('[Whiteboard realtime] write: stroke', stroke.id, 'en', path);
   const docRef = doc(db, 'lessons', lessonId, 'whiteboard', 'state');
 
   try {
@@ -70,7 +78,8 @@ export async function saveStroke(
       { merge: true }
     );
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.error('[Whiteboard realtime] error:', error);
+    throw error;
   }
 }
 
@@ -83,6 +92,7 @@ export async function saveTemplates(
   templates: MusicTemplate[]
 ): Promise<void> {
   const path = `lessons/${lessonId}/whiteboard/state`;
+  console.log('[Whiteboard realtime] write: templates', templates.length, 'en', path);
   const docRef = doc(db, 'lessons', lessonId, 'whiteboard', 'state');
 
   try {
@@ -95,7 +105,8 @@ export async function saveTemplates(
       { merge: true }
     );
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.error('[Whiteboard realtime] error:', error);
+    throw error;
   }
 }
 
@@ -104,6 +115,7 @@ export async function saveTemplates(
  */
 export async function clearWhiteboard(lessonId: string): Promise<void> {
   const path = `lessons/${lessonId}/whiteboard/state`;
+  console.log('[Whiteboard realtime] write: clear en', path);
   const docRef = doc(db, 'lessons', lessonId, 'whiteboard', 'state');
 
   try {
@@ -113,6 +125,7 @@ export async function clearWhiteboard(lessonId: string): Promise<void> {
       updatedAt: serverTimestamp(),
     });
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.error('[Whiteboard realtime] error:', error);
+    throw error;
   }
 }

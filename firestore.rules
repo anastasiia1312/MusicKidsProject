@@ -51,10 +51,11 @@ service cloud.firestore {
 
       // Subcolección whiteboard de la clase: acceso exclusivo para el profesor y alumno asignados
       match /whiteboard/{docId} {
-        allow read, write: if isSignedIn() && (
-          get(/databases/$(database)/documents/lessons/$(lessonId)).data.teacherId == request.auth.uid ||
-          get(/databases/$(database)/documents/lessons/$(lessonId)).data.studentId == request.auth.uid
-        );
+        allow read, write: if isSignedIn() &&
+          exists(/databases/$(database)/documents/lessons/$(lessonId)) && (
+            get(/databases/$(database)/documents/lessons/$(lessonId)).data.teacherId == request.auth.uid ||
+            get(/databases/$(database)/documents/lessons/$(lessonId)).data.studentId == request.auth.uid
+          );
       }
     }
   }
