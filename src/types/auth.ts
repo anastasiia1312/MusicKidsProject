@@ -8,6 +8,14 @@ export type AuthProviderType = 'email' | 'google';
 
 export type TeacherInstrument = 'guitar' | 'ukulele' | 'solfege' | 'vocal';
 
+export interface MonthlyPlan {
+  id: 'weekly_1' | 'weekly_2' | 'weekly_3';
+  lessonsPerWeek: number;
+  lessonsPerMonth: number;
+  price: number | null;
+  active: boolean;
+}
+
 export interface UserProfile {
   uid: string;
   name: string;
@@ -21,6 +29,8 @@ export interface UserProfile {
   instruments?: string[]; // Array con 'guitar', 'ukulele', 'solfege', 'vocal'
   education?: string; // Formación musical y estudios
   bio?: string; // Presentación personal
+  singleLessonPrice?: number; // Tarifa para clase individual
+  monthlyPlans?: MonthlyPlan[]; // Planes mensuales de clases
   updatedAt?: any;
 }
 

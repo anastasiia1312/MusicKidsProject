@@ -7,10 +7,13 @@ import {
   Sparkles,
   AlertCircle,
   Loader2,
+  DollarSign,
+  Calendar,
 } from 'lucide-react';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../services/firebase';
 import { useAuth } from '../../context/AuthContext';
+import type { MonthlyPlan } from '../../types/auth';
 
 interface PublicTeacherProfileProps {
   teacherId: string;
@@ -23,6 +26,8 @@ interface TeacherPublicData {
   instruments: string[];
   education: string;
   bio: string;
+  singleLessonPrice?: number | null;
+  monthlyPlans?: MonthlyPlan[];
 }
 
 const INSTRUMENT_LABELS: Record<string, string> = {
@@ -77,12 +82,23 @@ export const PublicTeacherProfile: React.FC<PublicTeacherProfileProps> = ({
         }
 
         // Extraer exclusivamente los campos públicos permitidos
+        const singleLessonPrice =
+          typeof data.singleLessonPrice === 'number' &&
+          !isNaN(data.singleLessonPrice) &&
+          data.singleLessonPrice > 0
+            ? data.singleLessonPrice
+            : null;
+
+        const monthlyPlans = Array.isArray(data.monthlyPlans) ? data.monthlyPlans : [];
+
         setTeacher({
           name: data.name || 'Profesor de Música',
           photoURL: data.photoURL || null,
           instruments: Array.isArray(data.instruments) ? data.instruments : [],
           education: data.education || '',
           bio: data.bio || '',
+          singleLessonPrice,
+          monthlyPlans,
         });
       } catch (err: any) {
         console.error('Error al cargar perfil público del profesor:', err);
@@ -302,6 +318,117 @@ export const PublicTeacherProfile: React.FC<PublicTeacherProfileProps> = ({
                 </p>
               )}
             </div>
+
+            {/* Tarifas */}
+            {(() => {
+              const hasSinglePrice =
+                typeof teacher.singleLessonPrice === 'number' &&
+                !isNaN(teacher.singleLessonPrice) &&
+                teacher.singleLessonPrice > 0;
+
+              const activeMonthlyPlans = Array.isArray(teacher.monthlyPlans)
+                ? teacher.monthlyPlans.filter(
+                    (plan) =>
+                      plan.active === true &&
+                      typeof plan.price === 'number' &&
+                      !isNaN(plan.price) &&
+                      plan.price > 0
+                  )
+                : [];
+
+              const hasAnyRates = hasSinglePrice || activeMonthlyPlans.length > 0;
+
+              const formatPrice = (val: number): string => {
+                return `$ ${val.toLocaleString('es-AR')}`;
+              };
+
+              return (
+                <div
+                  id="teacher-rates-public-section"
+                  className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/80 shadow-xs"
+                >
+                  <div className="flex items-center gap-2.5 mb-6">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
+                      <DollarSign className="w-5 h-5" />
+                    </div>
+                    <h2 className="text-lg font-bold text-slate-900">
+                      Tarifas
+                    </h2>
+                  </div>
+
+                  {!hasAnyRates ? (
+                    <p
+                      id="no-rates-message"
+                      className="text-sm text-slate-400 italic"
+                    >
+                      El profesor todavía no configuró sus tarifas.
+                    </p>
+                  ) : (
+                    <div className="space-y-6">
+                      {/* 1. Clase individual */}
+                      {hasSinglePrice && (
+                        <div id="public-single-lesson-rate" className="space-y-2">
+                          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                            Clase individual
+                          </h3>
+                          <div className="p-4 sm:p-5 rounded-2xl bg-slate-50/70 border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div>
+                              <span className="text-base font-bold text-slate-900 block">
+                                Clase individual
+                              </span>
+                              <span className="text-xs text-slate-500">
+                                Sesión individual personalizada
+                              </span>
+                            </div>
+                            <div className="text-lg sm:text-xl font-extrabold text-[#00537A]">
+                              {formatPrice(teacher.singleLessonPrice!)}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 2. Planes mensuales */}
+                      {activeMonthlyPlans.length > 0 && (
+                        <div id="public-monthly-plans-rate" className="space-y-3">
+                          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                            Planes mensuales
+                          </h3>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {activeMonthlyPlans.map((plan, idx) => (
+                              <div
+                                key={idx}
+                                className="p-5 rounded-2xl bg-slate-50/70 border border-slate-200/80 flex flex-col justify-between space-y-4"
+                              >
+                                <div className="space-y-1">
+                                  <div className="text-base font-bold text-slate-900">
+                                    {plan.lessonsPerWeek}{' '}
+                                    {plan.lessonsPerWeek === 1
+                                      ? 'clase por semana'
+                                      : 'clases por semana'}
+                                  </div>
+                                  <div className="text-xs font-medium text-slate-500">
+                                    {plan.lessonsPerMonth} clases al mes
+                                  </div>
+                                </div>
+
+                                <div className="pt-3 border-t border-slate-200/70">
+                                  <div className="text-lg font-extrabold text-[#00537A]">
+                                    {formatPrice(plan.price!)}{' '}
+                                    <span className="text-xs font-semibold text-slate-500">
+                                      / mes
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
       </main>

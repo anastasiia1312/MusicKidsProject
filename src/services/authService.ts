@@ -14,7 +14,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { auth, db, googleProvider } from './firebase';
-import type { UserProfile, UserRole } from '../types/auth';
+import type { UserProfile, UserRole, MonthlyPlan } from '../types/auth';
 
 export enum OperationType {
   CREATE = 'create',
@@ -197,6 +197,46 @@ export async function updateStudentProfileService(
     await updateDoc(userDocRef, {
       birthDate: data.birthDate?.trim() ?? '',
       bio: data.bio?.trim() ?? '',
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+/**
+ * Actualiza exclusivamente el precio de clase individual del profesor en 'users/{uid}'
+ * utilizando updateDoc para preservar todos los demás campos existentes.
+ */
+export async function updateSingleLessonPriceService(
+  uid: string,
+  price: number
+): Promise<void> {
+  const path = `users/${uid}`;
+  try {
+    const userDocRef = doc(db, 'users', uid);
+    await updateDoc(userDocRef, {
+      singleLessonPrice: price,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+/**
+ * Actualiza exclusivamente la lista de planes mensuales del profesor en 'users/{uid}'
+ * utilizando updateDoc para preservar todos los demás campos existentes.
+ */
+export async function updateMonthlyPlansService(
+  uid: string,
+  plans: MonthlyPlan[]
+): Promise<void> {
+  const path = `users/${uid}`;
+  try {
+    const userDocRef = doc(db, 'users', uid);
+    await updateDoc(userDocRef, {
+      monthlyPlans: plans,
       updatedAt: serverTimestamp(),
     });
   } catch (error) {

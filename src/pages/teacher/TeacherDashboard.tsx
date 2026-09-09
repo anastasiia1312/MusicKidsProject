@@ -17,6 +17,7 @@ import {
   Loader2,
   AlertCircle,
   RefreshCw,
+  DollarSign,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { getTeacherLessons, getStudents } from '../../services/lessonService';
@@ -227,6 +228,18 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
                 >
                   <User className="w-3.5 h-3.5 text-slate-400" />
                   Mi perfil
+                </button>
+                <button
+                  type="button"
+                  id="dropdown-teacher-rates-link"
+                  onClick={() => {
+                    setProfileDropdownOpen(false);
+                    onNavigate('/teacher/rates');
+                  }}
+                  className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
+                >
+                  <DollarSign className="w-3.5 h-3.5 text-slate-400" />
+                  Tarifas de clases
                 </button>
                 <button
                   type="button"

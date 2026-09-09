@@ -6,6 +6,7 @@ import { SelectRole } from './pages/SelectRole';
 import { TeacherDashboard } from './pages/teacher/TeacherDashboard';
 import { CreateLesson } from './pages/teacher/CreateLesson';
 import { TeacherProfile } from './pages/teacher/TeacherProfile';
+import { TeacherRates } from './pages/teacher/TeacherRates';
 import { StudentDashboard } from './pages/student/StudentDashboard';
 import { LessonPage } from './pages/LessonPage';
 import { LandingPage } from './pages/LandingPage';
@@ -127,7 +128,8 @@ function AppContent() {
     currentPath.startsWith('/teacher/') &&
     currentPath !== '/teacher/dashboard' &&
     currentPath !== '/teacher/lessons/new' &&
-    currentPath !== '/teacher/profile'
+    currentPath !== '/teacher/profile' &&
+    currentPath !== '/teacher/rates'
   ) {
     const teacherId = currentPath.replace('/teacher/', '').split('/')[0];
     return (
@@ -180,6 +182,13 @@ function AppContent() {
       return (
         <RoleRoute allowedRole="teacher" onRedirect={navigate}>
           <TeacherProfile onNavigate={navigate} />
+        </RoleRoute>
+      );
+
+    case '/teacher/rates':
+      return (
+        <RoleRoute allowedRole="teacher" onRedirect={navigate}>
+          <TeacherRates onNavigate={navigate} />
         </RoleRoute>
       );
 
