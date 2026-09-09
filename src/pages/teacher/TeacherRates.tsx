@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import {
-  ArrowLeft,
   GraduationCap,
   DollarSign,
   Save,
@@ -21,6 +20,8 @@ import {
   updateMonthlyPlansService,
 } from '../../services/authService';
 import type { MonthlyPlan } from '../../types/auth';
+import { TeacherClassesTabs } from '../../components/teacher/TeacherClassesTabs';
+import { TeacherLayout } from '../../components/teacher/TeacherLayout';
 
 interface TeacherRatesProps {
   onNavigate: (path: string) => void;
@@ -357,54 +358,10 @@ export const TeacherRates: React.FC<TeacherRatesProps> = ({ onNavigate }) => {
   };
 
   return (
-    <div id="teacher-rates-page" className="min-h-screen bg-[#F0F4F8] text-slate-900 flex flex-col font-sans">
-      {/* HEADER DE NAVEGACIÓN */}
-      <header className="w-full bg-white/95 backdrop-blur-md border-b border-slate-200/80 sticky top-0 z-40 transition-all shadow-2xs">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 h-16 sm:h-18 flex items-center justify-between">
-          {/* Logo MusicKids */}
-          <div
-            id="rates-brand-link"
-            className="flex items-center gap-1 cursor-pointer select-none group"
-            onClick={() => onNavigate('/teacher/dashboard')}
-            title="Volver al Panel del Profesor"
-          >
-            <span
-              className="font-abril text-[22px] sm:text-[26px] text-[#00537A] tracking-normal leading-none"
-              style={{ fontFamily: "'Abril Fatface', cursive, serif" }}
-            >
-              Music
-            </span>
-            <img
-              src="/images/logo-clef.png"
-              alt="Clave de Sol MusicKids"
-              className="h-7 sm:h-8 w-auto object-contain -mx-0.5 -mt-0.5 select-none pointer-events-none transition-transform duration-200 group-hover:scale-105"
-              referrerPolicy="no-referrer"
-            />
-            <span
-              className="font-abril text-[22px] sm:text-[26px] text-[#00537A] tracking-normal leading-none"
-              style={{ fontFamily: "'Abril Fatface', cursive, serif" }}
-            >
-              Kids
-            </span>
-          </div>
-
-          {/* Botón Volver al Dashboard */}
-          <button
-            type="button"
-            id="btn-back-to-teacher-dashboard"
-            onClick={() => onNavigate('/teacher/dashboard')}
-            className="inline-flex items-center gap-2 px-3.5 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold text-slate-700 hover:text-[#00537A] hover:bg-slate-100 transition-colors cursor-pointer"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>Volver al Panel</span>
-          </button>
-        </div>
-      </header>
-
-      {/* CONTENIDO PRINCIPAL */}
-      <main className="flex-1 w-full max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 relative z-10">
+    <TeacherLayout activeSection="classes" onNavigate={onNavigate}>
+      <div id="teacher-rates-content" className="w-full max-w-4xl flex flex-col gap-6">
         {/* Encabezado de la Sección */}
-        <div className="mb-6">
+        <div>
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-[#E8F3F8] text-[#00537A] mb-2">
             <GraduationCap className="w-3.5 h-3.5 text-[#00537A]" />
             <span>Tarifas del Profesor</span>
@@ -418,6 +375,11 @@ export const TeacherRates: React.FC<TeacherRatesProps> = ({ onNavigate }) => {
           <p className="text-sm text-slate-600 mt-1">
             Configurá el valor de tus clases particulares y planes mensuales.
           </p>
+
+          {/* Selector de pestañas: Horario / Tarifas */}
+          <div className="mt-5">
+            <TeacherClassesTabs activeTab="rates" onNavigate={onNavigate} />
+          </div>
         </div>
 
         {/* Estado de Carga Inicial */}
@@ -879,7 +841,7 @@ export const TeacherRates: React.FC<TeacherRatesProps> = ({ onNavigate }) => {
             </section>
           </div>
         )}
-      </main>
-    </div>
+      </div>
+    </TeacherLayout>
   );
 };
