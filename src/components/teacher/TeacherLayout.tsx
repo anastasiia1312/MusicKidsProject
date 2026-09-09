@@ -84,7 +84,7 @@ export const TeacherLayout: React.FC<TeacherLayoutProps> = ({
       {/* HEADER SUPERIOR */}
       <header
         id="teacher-dashboard-header"
-        className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-4 flex items-center justify-between relative z-20"
+        className="w-full max-w-[1680px] mx-auto px-4 sm:px-5 lg:px-6 pt-5 pb-3 flex items-center justify-between relative z-20"
       >
         {/* Bloque Izquierdo: Logotipo MusicKids + Menú + Saludo */}
         <div className="flex items-center gap-3 sm:gap-6">
@@ -240,7 +240,7 @@ export const TeacherLayout: React.FC<TeacherLayoutProps> = ({
       </header>
 
       {/* CONTENIDO PRINCIPAL (SIDEBAR + CONTENIDO DE PÁGINA) */}
-      <div className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 relative z-10 flex flex-col lg:flex-row gap-6 items-start">
+      <div className="flex-1 w-full max-w-[1680px] mx-auto px-4 sm:px-5 lg:px-6 py-4 sm:py-5 relative z-10 flex flex-col lg:flex-row gap-4 lg:gap-5 items-start">
         {/* SIDEBAR (Collapsible: Expanded vs Collapsed) */}
         <aside
           id="teacher-sidebar"
