@@ -19,11 +19,11 @@ export const SelectRole: React.FC<SelectRoleProps> = ({ onNavigate }) => {
   const { user, pendingGoogleUser, selectRoleForGoogleUser, logout } = useAuth();
   const activeUser = pendingGoogleUser || user;
 
-  const [selectedRole, setSelectedRole] = useState<UserRole | null>(null);
+  const [selectedRole, setSelectedRole] = useState<'student' | 'teacher' | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const handleConfirmRole = async (roleToSet?: UserRole) => {
+  const handleConfirmRole = async (roleToSet?: 'student' | 'teacher') => {
     const finalRole = roleToSet || selectedRole;
     if (!finalRole) {
       setErrorMessage('Seleccioná si vas a utilizar MusicKids como alumno o profesor.');

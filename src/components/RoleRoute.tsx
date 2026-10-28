@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
 import { LoadingScreen } from './common/LoadingScreen';
+import { AccountDisabledScreen } from './common/AccountDisabledScreen';
 import type { UserRole } from '../types/auth';
 
 interface RoleRouteProps {
@@ -14,10 +15,15 @@ export const RoleRoute: React.FC<RoleRouteProps> = ({
   children,
   onRedirect,
 }) => {
-  const { user, role, loading, pendingGoogleUser } = useAuth();
+  const { user, role, loading, isAccountDisabled, pendingGoogleUser } = useAuth();
 
   if (loading) {
     return <LoadingScreen message="Comprobando permisos de usuario..." />;
+  }
+
+  // Si la cuenta del usuario está desactivada, bloquear acceso inmediato
+  if (user && isAccountDisabled) {
+    return <AccountDisabledScreen onNavigate={onRedirect} />;
   }
 
   // Si no está autenticado, redirigir a Login
@@ -38,6 +44,8 @@ export const RoleRoute: React.FC<RoleRouteProps> = ({
       onRedirect('/teacher/dashboard');
     } else if (role === 'student') {
       onRedirect('/student/dashboard');
+    } else if (role === 'admin') {
+      onRedirect('/admin/dashboard');
     } else {
       onRedirect('/login');
     }

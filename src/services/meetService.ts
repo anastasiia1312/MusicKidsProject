@@ -1,4 +1,4 @@
-import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { GoogleAuthProvider, signInWithPopup, browserPopupRedirectResolver } from 'firebase/auth';
 import { auth } from './firebase';
 
 const MEET_SCOPE = 'https://www.googleapis.com/auth/meetings.space.created';
@@ -24,7 +24,7 @@ export async function getGoogleMeetAccessToken(): Promise<string> {
   });
 
   try {
-    const result = await signInWithPopup(auth, provider);
+    const result = await signInWithPopup(auth, provider, browserPopupRedirectResolver);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     const accessToken = credential?.accessToken;
 

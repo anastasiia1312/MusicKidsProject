@@ -23,7 +23,7 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [role, setRole] = useState<UserRole | ''>('');
+  const [role, setRole] = useState<'student' | 'teacher' | ''>('');
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -79,7 +79,7 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
     setErrorMessage(null);
 
     try {
-      const profile = await registerWithEmail(name, email, password, role as UserRole);
+      const profile = await registerWithEmail(name, email, password, role as 'student' | 'teacher');
       if (profile.role === 'teacher') {
         onNavigate('/teacher/dashboard');
       } else {

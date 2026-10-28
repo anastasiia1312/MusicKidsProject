@@ -13,12 +13,14 @@ import { LessonPage } from './pages/LessonPage';
 import { LandingPage } from './pages/LandingPage';
 import { PublicTeacherProfile } from './pages/teacher/PublicTeacherProfile';
 import { PublicStudentProfile } from './pages/student/PublicStudentProfile';
+import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { RoleRoute } from './components/RoleRoute';
 import { LoadingScreen } from './components/common/LoadingScreen';
+import { AccountDisabledScreen } from './components/common/AccountDisabledScreen';
 
 function AppContent() {
-  const { user, userProfile, role, loading, pendingGoogleUser } = useAuth();
+  const { user, userProfile, role, loading, isAccountDisabled, pendingGoogleUser } = useAuth();
   
   // Normalizar ruta inicial
   const getInitialPath = (): string => {
@@ -34,9 +36,11 @@ function AppContent() {
       pathname === '/student/profile' ||
       pathname === '/profile' ||
       pathname === '/student/dashboard' ||
+      pathname === '/admin/dashboard' ||
       pathname.startsWith('/lesson/') ||
       pathname.startsWith('/teacher/') ||
-      pathname.startsWith('/student/')
+      pathname.startsWith('/student/') ||
+      pathname.startsWith('/admin/')
     ) {
       return pathname;
     }
@@ -75,7 +79,8 @@ function AppContent() {
     }
 
     // Caso 2: Usuario con rol verificado que entra a login, register, select-role o raíz
-    if (user && role) {
+    // Si la cuenta está desactivada, no redirigir a los dashboards
+    if (user && role && !isAccountDisabled) {
       if (
         currentPath === '/login' ||
         currentPath === '/register' ||
@@ -86,6 +91,8 @@ function AppContent() {
           navigate('/teacher/dashboard');
         } else if (role === 'student') {
           navigate('/student/dashboard');
+        } else if (role === 'admin') {
+          navigate('/admin/dashboard');
         }
       }
       return;
@@ -100,18 +107,25 @@ function AppContent() {
         currentPath === '/student/profile' ||
         currentPath === '/profile' ||
         currentPath === '/student/dashboard' ||
+        currentPath === '/admin/dashboard' ||
         currentPath.startsWith('/lesson/') ||
         currentPath.startsWith('/teacher/') ||
         currentPath.startsWith('/student/') ||
+        currentPath.startsWith('/admin/') ||
         currentPath === '/select-role'
       ) {
         navigate('/login');
       }
     }
-  }, [user, userProfile, role, loading, pendingGoogleUser, currentPath, navigate]);
+  }, [user, userProfile, role, loading, isAccountDisabled, pendingGoogleUser, currentPath, navigate]);
 
   if (loading) {
     return <LoadingScreen message="Iniciando MusicKids..." />;
+  }
+
+  // Si el usuario autenticado tiene su cuenta desactivada, mostrar inmediatamente la pantalla de bloqueo
+  if (user && isAccountDisabled) {
+    return <AccountDisabledScreen onNavigate={navigate} />;
   }
 
   // Renderizar rutas dinámicas de clase: /lesson/:lessonId
@@ -226,6 +240,13 @@ function AppContent() {
       return (
         <RoleRoute allowedRole="student" onRedirect={navigate}>
           <StudentDashboard onNavigate={navigate} />
+        </RoleRoute>
+      );
+
+    case '/admin/dashboard':
+      return (
+        <RoleRoute allowedRole="admin" onRedirect={navigate}>
+          <AdminDashboard onNavigate={navigate} />
         </RoleRoute>
       );
 

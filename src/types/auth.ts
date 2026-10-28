@@ -2,7 +2,9 @@
  * Tipos de datos para el sistema de autenticación y perfiles de MusicKids
  */
 
-export type UserRole = 'student' | 'teacher';
+export type UserRole = 'student' | 'teacher' | 'admin';
+
+export type UserStatus = 'active' | 'disabled';
 
 export type AuthProviderType = 'email' | 'google';
 
@@ -21,6 +23,7 @@ export interface UserProfile {
   name: string;
   email: string;
   role: UserRole;
+  status?: UserStatus;
   photoURL: string | null;
   authProvider: AuthProviderType;
   createdAt: any; // Firebase Timestamp o string serializado

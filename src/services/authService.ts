@@ -13,7 +13,7 @@ import {
   updateDoc,
   serverTimestamp,
 } from 'firebase/firestore';
-import { auth, db, googleProvider } from './firebase';
+import { auth, db, googleProvider, browserPopupRedirectResolver } from './firebase';
 import type { UserProfile, UserRole, MonthlyPlan } from '../types/auth';
 
 export enum OperationType {
@@ -140,7 +140,12 @@ export async function fetchUserProfile(uid: string): Promise<UserProfile | null>
     const docSnap = await getDoc(userDocRef);
 
     if (docSnap.exists()) {
-      return docSnap.data() as UserProfile;
+      const data = docSnap.data();
+      return {
+        ...data,
+        uid: docSnap.id,
+        status: data.status || 'active',
+      } as UserProfile;
     }
     return null;
   } catch (error) {
@@ -251,7 +256,7 @@ export async function registerWithEmailService(
   name: string,
   email: string,
   pass: string,
-  role: UserRole
+  role: 'student' | 'teacher'
 ): Promise<{ user: User; profile: UserProfile }> {
   // 1. Crear el usuario en Firebase Authentication
   const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), pass);
@@ -268,6 +273,7 @@ export async function registerWithEmailService(
     name: name.trim(),
     email: user.email || email.trim(),
     role: role,
+    status: 'active',
     photoURL: user.photoURL || null,
     authProvider: 'email',
     createdAt: serverTimestamp(),
@@ -306,7 +312,7 @@ export async function loginWithGoogleService(): Promise<{
   profile: UserProfile | null;
   isNewUser: boolean;
 }> {
-  const userCredential = await signInWithPopup(auth, googleProvider);
+  const userCredential = await signInWithPopup(auth, googleProvider, browserPopupRedirectResolver);
   const user = userCredential.user;
   const profile = await fetchUserProfile(user.uid);
 
@@ -322,7 +328,7 @@ export async function loginWithGoogleService(): Promise<{
  */
 export async function completeGoogleUserRole(
   user: User,
-  role: UserRole
+  role: 'student' | 'teacher'
 ): Promise<UserProfile> {
   // Detectar si el usuario se autenticó originalmente con Google o con email/password
   const isGoogle = user.providerData?.some((p) => p.providerId === 'google.com' || p.providerId === 'google');
@@ -335,6 +341,7 @@ export async function completeGoogleUserRole(
     name: derivedName,
     email: user.email || '',
     role: role,
+    status: 'active',
     photoURL: user.photoURL || null,
     authProvider: isGoogle ? 'google' : 'email',
     createdAt: serverTimestamp(),

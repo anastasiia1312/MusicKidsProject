@@ -2,18 +2,35 @@
   "entities": {
     "User": {
       "title": "User",
-      "description": "Perfil de usuario (profesor o alumno)",
+      "description": "Perfil de usuario (profesor, alumno o administrador)",
       "type": "object",
       "properties": {
         "uid": { "type": "string" },
         "name": { "type": "string" },
         "email": { "type": "string", "format": "email" },
-        "role": { "type": "string", "enum": ["student", "teacher"] },
+        "role": { "type": "string", "enum": ["student", "teacher", "admin"] },
+        "status": { "type": "string", "enum": ["active", "disabled"] },
         "photoURL": { "type": "string" },
         "authProvider": { "type": "string", "enum": ["email", "google"] },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "name", "email", "role", "authProvider"]
+    },
+    "TeacherAvailability": {
+      "title": "TeacherAvailability",
+      "description": "Franja horaria disponible configurada por un profesor",
+      "type": "object",
+      "properties": {
+        "teacherId": { "type": "string" },
+        "date": { "type": "string", "description": "Formato YYYY-MM-DD" },
+        "startTime": { "type": "string", "description": "Formato HH:mm" },
+        "duration": { "type": "number", "enum": [30, 45, 60] },
+        "status": { "type": "string", "enum": ["available", "booked"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["teacherId", "date", "startTime", "duration", "status"]
     },
     "Lesson": {
       "title": "Lesson",
@@ -54,6 +71,10 @@
     "/users/{userId}": {
       "entity": "User",
       "description": "Documentos de usuarios identificados por su UID de Firebase Authentication."
+    },
+    "/teacherAvailability/{availabilityId}": {
+      "entity": "TeacherAvailability",
+      "description": "Colección de horarios y franjas de disponibilidad configuradas por los profesores."
     },
     "/lessons/{lessonId}": {
       "entity": "Lesson",

@@ -7,51 +7,114 @@ service cloud.firestore {
     function isSignedIn() {
       return request.auth != null;
     }
+
+    // Función auxiliar para verificar si existe el documento del usuario actual en Firestore
+    function hasUserData() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    // Función auxiliar para obtener los datos del usuario actual en Firestore
+    function currentUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Verificar si el usuario autenticado tiene su cuenta activa
+    // Por compatibilidad con cuentas existentes, si no tiene 'status', se considera 'active'
+    function isActiveUser() {
+      return hasUserData() && currentUserData().get('status', 'active') == 'active';
+    }
+
+    // Verificar si el usuario es un administrador activo
+    function isActiveAdmin() {
+      return hasUserData() 
+        && currentUserData().get('role', '') == 'admin' 
+        && currentUserData().get('status', 'active') == 'active';
+    }
     
     // Reglas para la colección de usuarios
     match /users/{userId} {
-      // Cualquier usuario autenticado puede leer perfiles (necesario para listar alumnos y resolver nombres)
-      allow read: if isSignedIn();
+      // Un usuario autenticado puede leer su propio perfil siempre (incluso si está desactivado, para poder detectar su estado).
+      // Para leer perfiles ajenos (catálogo de profesores, alumnos en clase o panel de administración), debe ser un usuario activo.
+      allow read: if isSignedIn() && (request.auth.uid == userId || isActiveUser());
       
-      // Permitir crear el perfil si está autenticado con el mismo UID y el rol es válido ('student' o 'teacher')
+      // Permitir crear el perfil si está autenticado con el mismo UID y el rol es EXCLUSIVAMENTE 'student' o 'teacher'
+      // El estado inicial (si se envía) debe ser 'active'. Se impide estrictamente registrarse como 'admin'.
       allow create: if isSignedIn() 
                     && request.auth.uid == userId 
                     && request.resource.data.uid == userId
-                    && request.resource.data.role in ['student', 'teacher'];
+                    && request.resource.data.role in ['student', 'teacher']
+                    && request.resource.data.get('status', 'active') == 'active';
                     
-      // Permitir actualizar su propio perfil manteniendo la coherencia de UID y rol válido
-      allow update: if isSignedIn() 
-                    && request.auth.uid == userId 
-                    && request.resource.data.uid == userId
-                    && request.resource.data.role in ['student', 'teacher'];
+      // Permitir actualizar perfil bajo dos únicas vías seguras:
+      // Vía 1: El propio usuario activo actualiza sus datos personales (su rol y status son INMUTABLES)
+      // Vía 2: Un administrador activo modifica EXCLUSIVAMENTE el campo status de otro usuario (no puede desactivarse a sí mismo)
+      allow update: if isSignedIn() && (
+        // Vía 1: Actualización propia por usuario activo
+        (
+          isActiveUser()
+          && request.auth.uid == userId 
+          && request.resource.data.uid == userId
+          && request.resource.data.get('role', '') == resource.data.get('role', '')
+          && request.resource.data.get('status', 'active') == resource.data.get('status', 'active')
+        )
+        ||
+        // Vía 2: Activación/Desactivación por un administrador activo
+        (
+          isActiveAdmin()
+          && request.auth.uid != userId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+          && request.resource.data.status in ['active', 'disabled']
+        )
+      );
                     
-      allow delete: if isSignedIn() && request.auth.uid == userId;
+      // Prohibir la eliminación de documentos de usuarios desde el cliente en este MVP
+      allow delete: if false;
+    }
+
+    // Reglas para la colección de disponibilidad de profesores (teacherAvailability)
+    match /teacherAvailability/{availabilityId} {
+      // Cualquier usuario autenticado y activo puede consultar horarios disponibles
+      allow read: if isActiveUser();
+
+      // Solo un profesor activo puede crear franjas asignándose como teacherId
+      allow create: if isActiveUser()
+                    && request.resource.data.teacherId == request.auth.uid
+                    && currentUserData().get('role', '') == 'teacher'
+                    && request.resource.data.status in ['available', 'booked'];
+
+      // Solo el profesor dueño activo puede modificar su franja (teacherId inmutable)
+      allow update: if isActiveUser()
+                    && resource.data.teacherId == request.auth.uid
+                    && request.resource.data.teacherId == request.auth.uid;
+
+      // Solo el profesor dueño activo puede eliminar su franja
+      allow delete: if isActiveUser() && resource.data.teacherId == request.auth.uid;
     }
 
     // Reglas para la colección de clases (lessons)
     match /lessons/{lessonId} {
-      // Solo el profesor o el alumno asignado pueden leer la clase
-      allow read: if isSignedIn() && (
+      // Solo el profesor o el alumno asignado y activos pueden leer la clase
+      allow read: if isActiveUser() && (
         resource.data.teacherId == request.auth.uid || 
         resource.data.studentId == request.auth.uid
       );
       
-      // Solo un profesor puede crear clases asignándose a sí mismo como teacherId
-      allow create: if isSignedIn() 
+      // Solo un profesor activo puede crear clases asignándose a sí mismo como teacherId
+      allow create: if isActiveUser() 
                     && request.resource.data.teacherId == request.auth.uid
-                    && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher'
+                    && currentUserData().get('role', '') == 'teacher'
                     && request.resource.data.status in ['scheduled', 'in_progress', 'completed', 'cancelled'];
                     
-      // Solo el profesor creador puede actualizar o eliminar la clase
-      allow update: if isSignedIn() 
+      // Solo el profesor creador activo puede actualizar o eliminar la clase
+      allow update: if isActiveUser() 
                     && resource.data.teacherId == request.auth.uid
                     && request.resource.data.teacherId == request.auth.uid;
                     
-      allow delete: if isSignedIn() && resource.data.teacherId == request.auth.uid;
+      allow delete: if isActiveUser() && resource.data.teacherId == request.auth.uid;
 
-      // Subcolección whiteboard de la clase: acceso exclusivo para el profesor y alumno asignados
+      // Subcolección whiteboard de la clase: acceso exclusivo para el profesor y alumno activos asignados
       match /whiteboard/{docId} {
-        allow read, write: if isSignedIn() &&
+        allow read, write: if isActiveUser() &&
           exists(/databases/$(database)/documents/lessons/$(lessonId)) && (
             get(/databases/$(database)/documents/lessons/$(lessonId)).data.teacherId == request.auth.uid ||
             get(/databases/$(database)/documents/lessons/$(lessonId)).data.studentId == request.auth.uid

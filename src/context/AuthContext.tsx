@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { onAuthStateChanged, type User } from 'firebase/auth';
-import { auth } from '../services/firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { auth, db } from '../services/firebase';
 import {
   fetchUserProfile,
   registerWithEmailService,
@@ -16,16 +17,17 @@ interface AuthContextType {
   userProfile: UserProfile | null;
   role: UserRole | null;
   loading: boolean;
+  isAccountDisabled: boolean;
   pendingGoogleUser: User | null;
   registerWithEmail: (
     name: string,
     email: string,
     pass: string,
-    role: UserRole
+    role: 'student' | 'teacher'
   ) => Promise<UserProfile>;
   loginWithEmail: (email: string, pass: string) => Promise<UserProfile | null>;
   loginWithGoogle: () => Promise<{ isNewUser: boolean; profile: UserProfile | null }>;
-  selectRoleForGoogleUser: (role: UserRole) => Promise<UserProfile>;
+  selectRoleForGoogleUser: (role: 'student' | 'teacher') => Promise<UserProfile>;
   logout: () => Promise<void>;
   refreshUserProfile: () => Promise<UserProfile | null>;
 }
@@ -39,38 +41,89 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState<boolean>(true);
   const [pendingGoogleUser, setPendingGoogleUser] = useState<User | null>(null);
 
-  // Escuchar cambios de autenticación en Firebase
+  // Escuchar cambios de autenticación en Firebase y cambios en tiempo real del documento de usuario
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (currentUser) {
-        setUser(currentUser);
-        try {
-          const profile = await fetchUserProfile(currentUser.uid);
-          if (profile) {
-            setUserProfile(profile);
-            setRole(profile.role);
-            setPendingGoogleUser(null);
-          } else {
-            // Usuario autenticado (por ejemplo, con Google) pero sin documento en Firestore aún
-            setUserProfile(null);
-            setRole(null);
-            setPendingGoogleUser(currentUser);
-          }
-        } catch (error) {
-          console.error('Error al sincronizar el perfil con Firestore:', error);
+    let unsubscribeUserSnapshot: (() => void) | null = null;
+
+    const unsubscribeAuth = onAuthStateChanged(
+      auth,
+      (currentUser) => {
+        // Limpiar listener anterior si existía
+        if (unsubscribeUserSnapshot) {
+          unsubscribeUserSnapshot();
+          unsubscribeUserSnapshot = null;
+        }
+
+        if (currentUser) {
+          setUser(currentUser);
+
+          // Escuchar en tiempo real el documento en 'users/{uid}'
+          // Esto garantiza que si el administrador desactiva o reactiva la cuenta,
+          // el frontend reaccione inmediatamente sin requerir recargar la página.
+          const userDocRef = doc(db, 'users', currentUser.uid);
+          unsubscribeUserSnapshot = onSnapshot(
+            userDocRef,
+            (docSnap) => {
+              if (docSnap.exists()) {
+                const data = docSnap.data();
+                const profile: UserProfile = {
+                  uid: docSnap.id,
+                  name: data.name || 'Sin nombre',
+                  email: data.email || currentUser.email || '',
+                  role: (data.role as UserRole) || 'student',
+                  status: data.status || 'active', // Compatibilidad: por defecto 'active'
+                  photoURL: data.photoURL || currentUser.photoURL || null,
+                  authProvider: data.authProvider || 'email',
+                  createdAt: data.createdAt,
+                  birthDate: data.birthDate,
+                  instruments: Array.isArray(data.instruments) ? data.instruments : [],
+                  education: data.education,
+                  bio: data.bio,
+                  singleLessonPrice: data.singleLessonPrice,
+                  monthlyPlans: data.monthlyPlans,
+                  updatedAt: data.updatedAt,
+                };
+
+                setUserProfile(profile);
+                setRole(profile.role);
+                setPendingGoogleUser(null);
+              } else {
+                // Usuario autenticado (por ejemplo con Google) pero sin documento en Firestore aún
+                setUserProfile(null);
+                setRole(null);
+                setPendingGoogleUser(currentUser);
+              }
+              setLoading(false);
+            },
+            (error) => {
+              console.error('Error en listener de perfil de usuario:', error);
+              setLoading(false);
+            }
+          );
+        } else {
+          setUser(null);
           setUserProfile(null);
           setRole(null);
+          setPendingGoogleUser(null);
+          setLoading(false);
         }
-      } else {
+      },
+      (error) => {
+        console.error('Error en el observador de autenticación:', error);
         setUser(null);
         setUserProfile(null);
         setRole(null);
         setPendingGoogleUser(null);
+        setLoading(false);
       }
-      setLoading(false);
-    });
+    );
 
-    return () => unsubscribe();
+    return () => {
+      if (unsubscribeUserSnapshot) {
+        unsubscribeUserSnapshot();
+      }
+      unsubscribeAuth();
+    };
   }, []);
 
   const refreshUserProfile = async (): Promise<UserProfile | null> => {
@@ -97,7 +150,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     name: string,
     email: string,
     pass: string,
-    userRole: UserRole
+    userRole: 'student' | 'teacher'
   ): Promise<UserProfile> => {
     setLoading(true);
     try {
@@ -164,7 +217,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const selectRoleForGoogleUser = async (userRole: UserRole): Promise<UserProfile> => {
+  const selectRoleForGoogleUser = async (userRole: 'student' | 'teacher'): Promise<UserProfile> => {
     const targetUser = pendingGoogleUser || user || auth.currentUser;
     if (!targetUser) {
       throw new Error('No hay ninguna sesión activa de usuario para asignar rol.');
@@ -196,6 +249,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const isAccountDisabled = userProfile?.status === 'disabled';
+
   return (
     <AuthContext.Provider
       value={{
@@ -203,6 +258,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         userProfile,
         role,
         loading,
+        isAccountDisabled,
         pendingGoogleUser,
         registerWithEmail,
         loginWithEmail,

@@ -1,5 +1,14 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, type Auth } from 'firebase/auth';
+import {
+  initializeAuth,
+  getAuth,
+  browserLocalPersistence,
+  browserSessionPersistence,
+  inMemoryPersistence,
+  browserPopupRedirectResolver,
+  GoogleAuthProvider,
+  type Auth,
+} from 'firebase/auth';
 import { getFirestore, type Firestore } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -12,8 +21,20 @@ if (!getApps().length) {
   app = getApp();
 }
 
-// Inicialización de Firebase Authentication
-export const auth: Auth = getAuth(app);
+// Inicialización de Firebase Authentication con persistencia robusta (localStorage -> sessionStorage -> inMemory)
+// y el resolver browserPopupRedirectResolver para evitar el fallo auth/argument-error en signInWithPopup
+let authInstance: Auth;
+try {
+  authInstance = initializeAuth(app, {
+    persistence: [browserLocalPersistence, browserSessionPersistence, inMemoryPersistence],
+    popupRedirectResolver: browserPopupRedirectResolver,
+  });
+} catch {
+  authInstance = getAuth(app);
+}
+
+export const auth: Auth = authInstance;
+export { browserPopupRedirectResolver };
 
 // Proveedor de Google con selector de cuentas
 export const googleProvider = new GoogleAuthProvider();
