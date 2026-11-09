@@ -1,5 +1,10 @@
 import { Timestamp } from 'firebase/firestore';
 
+/**
+ * Duración fija y obligatoria para todas las clases y disponibilidades nuevas de MusicKids.
+ */
+export const LESSON_DURATION_MINUTES = 45;
+
 export type LessonStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
 
 export interface Lesson {
@@ -10,6 +15,8 @@ export interface Lesson {
   date: Timestamp;
   duration: number; // Duración en minutos (30, 45, 60, 90)
   status: LessonStatus;
+  availabilityId?: string;
+  monthlyBookingId?: string;
   meetUrl?: string;
   meetSpaceName?: string;
   createdAt?: any;
@@ -27,6 +34,7 @@ export interface CreateLessonPayload {
   studentId: string;
   date: Timestamp;
   duration: number;
+  monthlyBookingId?: string;
   meetUrl?: string;
   meetSpaceName?: string;
 }

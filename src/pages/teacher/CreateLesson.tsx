@@ -12,8 +12,9 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { Navbar } from '../../components/common/Navbar';
 import { getStudents, createLesson } from '../../services/lessonService';
-import { createGoogleMeetSpace } from '../../services/meetService';
+import { getOrCreateTeacherPermanentMeetSpace } from '../../services/permanentMeetService';
 import { combineDateAndTimeToTimestamp } from '../../utils/dateUtils';
+import { LESSON_DURATION_MINUTES } from '../../types/lesson';
 import type { UserProfile } from '../../types/auth';
 
 interface CreateLessonProps {
@@ -27,7 +28,7 @@ export const CreateLesson: React.FC<CreateLessonProps> = ({ onNavigate }) => {
   const [studentId, setStudentId] = useState('');
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
-  const [duration, setDuration] = useState<number>(60);
+  const duration = LESSON_DURATION_MINUTES;
 
   const [students, setStudents] = useState<UserProfile[]>([]);
   const [loadingStudents, setLoadingStudents] = useState(true);
@@ -105,15 +106,28 @@ export const CreateLesson: React.FC<CreateLessonProps> = ({ onNavigate }) => {
     setIsSubmitting(true);
 
     try {
-      // 1. Crear el espacio oficial de reunión en Google Meet mediante REST API v2
+      // 1. Obtener o reutilizar la sala permanente de Google Meet del profesor
       let meetResult: { meetUrl: string; meetSpaceName: string };
       try {
-        meetResult = await createGoogleMeetSpace();
+        meetResult = await getOrCreateTeacherPermanentMeetSpace(user.uid);
       } catch (meetErr: any) {
-        console.error('Error al crear espacio en Google Meet:', meetErr);
-        setErrorMessage(
-          'No se pudo crear la videollamada de Google Meet. Intentá nuevamente.'
-        );
+        console.error('Error al obtener o crear la sala permanente de Google Meet:', meetErr);
+        if (meetErr?.code === 'auth/popup-closed-by-user') {
+          setErrorMessage(
+            'Se canceló la ventana de autorización de Google. Se requiere autorización para crear clases con Google Meet.'
+          );
+        } else if (
+          meetErr?.message?.includes('PERMISSIONS_DENIED_PRIVATE_SETTINGS') ||
+          meetErr?.message?.includes('privateSettings')
+        ) {
+          setErrorMessage(
+            'Permisos insuficientes en Firestore para acceder a la configuración privada de la sala permanente (users/{teacherId}/privateSettings/meetConfig).'
+          );
+        } else {
+          setErrorMessage(
+            meetErr?.message || 'No se pudo vincular la sala de Google Meet del profesor. Verificá tu autorización e intentá nuevamente.'
+          );
+        }
         setIsSubmitting(false);
         return;
       }
@@ -300,31 +314,6 @@ export const CreateLesson: React.FC<CreateLessonProps> = ({ onNavigate }) => {
                   />
                 </div>
               </div>
-            </div>
-
-            {/* Duración */}
-            <div>
-              <label
-                htmlFor="lesson-duration"
-                className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2"
-              >
-                Duración
-              </label>
-              <select
-                id="lesson-duration"
-                value={duration}
-                onChange={(e) => {
-                  setDuration(Number(e.target.value));
-                  if (errorMessage) setErrorMessage(null);
-                }}
-                disabled={isSubmitting}
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all text-slate-800 text-sm font-medium cursor-pointer"
-              >
-                <option value={30}>30 minutos</option>
-                <option value={45}>45 minutos</option>
-                <option value={60}>60 minutos</option>
-                <option value={90}>90 minutos</option>
-              </select>
             </div>
 
             {/* Botones de acción */}

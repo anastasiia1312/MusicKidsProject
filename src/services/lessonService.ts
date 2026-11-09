@@ -12,7 +12,7 @@ import {
 import { db } from './firebase';
 import { handleFirestoreError, OperationType } from './authService';
 import type { UserProfile } from '../types/auth';
-import type { Lesson, CreateLessonPayload } from '../types/lesson';
+import { LESSON_DURATION_MINUTES, type Lesson, type CreateLessonPayload } from '../types/lesson';
 
 /**
  * Obtiene la lista de todos los usuarios registrados con rol 'student'
@@ -43,7 +43,7 @@ export async function createLesson(payload: CreateLessonPayload): Promise<string
       teacherId: payload.teacherId,
       studentId: payload.studentId,
       date: payload.date,
-      duration: payload.duration,
+      duration: payload.duration || LESSON_DURATION_MINUTES,
       status: 'scheduled' as const,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -196,4 +196,24 @@ export async function getLessonById(lessonId: string): Promise<Lesson | null> {
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, path);
   }
+}
+
+export interface BookSlotParams {
+  availabilityId: string;
+  teacherId: string;
+  studentId: string;
+  teacherName?: string;
+  slotDate: string;
+  slotStartTime: string;
+  duration: number;
+}
+
+/**
+ * @deprecated [LEGACY] La reserva de clases individuales fuera de un abono mensual ha sido descontinuada.
+ * MusicKids gestiona las reservas exclusivamente mediante abonos mensuales recurrentes (teacherRecurringSlots).
+ */
+export async function bookTeacherSlot(params: BookSlotParams): Promise<{ lessonId: string }> {
+  throw new Error(
+    'INDIVIDUAL_BOOKINGS_DEPRECATED: La reserva de clases individuales fuera de un abono mensual ha sido descontinuada. Las clases se contratan exclusivamente mediante abonos mensuales.'
+  );
 }

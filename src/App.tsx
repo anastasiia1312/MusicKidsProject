@@ -14,6 +14,7 @@ import { LandingPage } from './pages/LandingPage';
 import { PublicTeacherProfile } from './pages/teacher/PublicTeacherProfile';
 import { PublicStudentProfile } from './pages/student/PublicStudentProfile';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
+import { TeacherCatalog } from './pages/student/TeacherCatalog';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { RoleRoute } from './components/RoleRoute';
 import { LoadingScreen } from './components/common/LoadingScreen';
@@ -159,7 +160,8 @@ function AppContent() {
   if (
     currentPath.startsWith('/student/') &&
     currentPath !== '/student/dashboard' &&
-    currentPath !== '/student/profile'
+    currentPath !== '/student/profile' &&
+    currentPath !== '/student/teachers'
   ) {
     const studentId = currentPath.replace('/student/', '').split('/')[0];
     return (
@@ -223,6 +225,13 @@ function AppContent() {
       );
 
     case '/profile':
+      if (role === 'admin') {
+        return (
+          <RoleRoute allowedRole="admin" onRedirect={navigate}>
+            <AdminDashboard onNavigate={navigate} />
+          </RoleRoute>
+        );
+      }
       if (role === 'teacher') {
         return (
           <RoleRoute allowedRole="teacher" onRedirect={navigate}>
@@ -240,6 +249,13 @@ function AppContent() {
       return (
         <RoleRoute allowedRole="student" onRedirect={navigate}>
           <StudentDashboard onNavigate={navigate} />
+        </RoleRoute>
+      );
+
+    case '/student/teachers':
+      return (
+        <RoleRoute allowedRole="student" onRedirect={navigate}>
+          <TeacherCatalog onNavigate={navigate} />
         </RoleRoute>
       );
 

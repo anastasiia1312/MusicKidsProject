@@ -27,6 +27,7 @@
         "startTime": { "type": "string", "description": "Formato HH:mm" },
         "duration": { "type": "number", "enum": [30, 45, 60] },
         "status": { "type": "string", "enum": ["available", "booked"] },
+        "lessonId": { "type": "string", "description": "Identificador de la clase reservada" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -43,6 +44,7 @@
         "date": { "type": "string", "format": "date-time" },
         "duration": { "type": "number", "enum": [30, 45, 60, 90] },
         "status": { "type": "string", "enum": ["scheduled", "in_progress", "completed", "cancelled"] },
+        "availabilityId": { "type": "string", "description": "Identificador del horario reservado" },
         "meetUrl": { "type": "string" },
         "meetSpaceName": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
@@ -65,6 +67,58 @@
         },
         "updatedAt": { "type": "string", "format": "date-time" }
       }
+    },
+    "TeacherRecurringSlot": {
+      "title": "TeacherRecurringSlot",
+      "description": "Regla semanal de disponibilidad recurrente permanente del profesor",
+      "type": "object",
+      "properties": {
+        "teacherId": { "type": "string" },
+        "dayOfWeek": { "type": "number", "minimum": 0, "maximum": 6 },
+        "startTime": { "type": "string", "description": "Formato HH:mm" },
+        "endTime": { "type": "string", "description": "Formato HH:mm" },
+        "duration": { "type": "number", "enum": [30, 45, 60] },
+        "isActive": { "type": "boolean" },
+        "originDate": { "type": "string", "description": "Formato YYYY-MM-DD" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["teacherId", "dayOfWeek", "startTime", "endTime", "duration", "isActive", "originDate"]
+    },
+    "MonthlyBooking": {
+      "title": "MonthlyBooking",
+      "description": "Abono mensual contratado por un alumno que agrupa las clases de un mes específico",
+      "type": "object",
+      "properties": {
+        "teacherId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "month": { "type": "string", "description": "Formato YYYY-MM" },
+        "recurringSlotIds": { "type": "array" },
+        "weeklyFrequency": { "type": "number", "enum": [1, 2, 3] },
+        "lessonIds": { "type": "array" },
+        "totalLessons": { "type": "number" },
+        "status": { "type": "string", "enum": ["confirmed", "pending_payment", "cancelled", "refunded"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["teacherId", "studentId", "month", "recurringSlotIds", "weeklyFrequency", "lessonIds", "totalLessons", "status"]
+    },
+    "TeacherSlotLock": {
+      "title": "TeacherSlotLock",
+      "description": "Cerrojo determinista de exclusividad horaria por profesor y fecha",
+      "type": "object",
+      "properties": {
+        "teacherId": { "type": "string" },
+        "date": { "type": "string", "description": "Formato YYYY-MM-DD" },
+        "startTime": { "type": "string", "description": "Formato HH:mm" },
+        "endTime": { "type": "string", "description": "Formato HH:mm" },
+        "duration": { "type": "number" },
+        "bookingType": { "type": "string", "enum": ["monthly", "punctual", "manual"] },
+        "bookingId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["teacherId", "date", "startTime", "endTime", "bookingType", "bookingId", "studentId"]
     }
   },
   "firestore": {
@@ -76,6 +130,10 @@
       "entity": "TeacherAvailability",
       "description": "Colección de horarios y franjas de disponibilidad configuradas por los profesores."
     },
+    "/teacherRecurringSlots/{recurringSlotId}": {
+      "entity": "TeacherRecurringSlot",
+      "description": "Colección de horarios semanales recurrentes permanentes configurados por profesores."
+    },
     "/lessons/{lessonId}": {
       "entity": "Lesson",
       "description": "Colección de clases de música asignadas entre un profesor y un alumno."
@@ -83,6 +141,14 @@
     "/lessons/{lessonId}/whiteboard/{docId}": {
       "entity": "WhiteboardState",
       "description": "Documento de estado de la pizarra en tiempo real de una clase específica."
+    },
+    "/monthlyBookings/{bookingId}": {
+      "entity": "MonthlyBooking",
+      "description": "Colección de abonos mensuales que agrupan clases recurrentes de un mes."
+    },
+    "/teacherSlotLocks/{lockKey}": {
+      "entity": "TeacherSlotLock",
+      "description": "Colección de cerrojos deterministas de concurrencia por profesor, fecha y hora."
     }
   }
 }

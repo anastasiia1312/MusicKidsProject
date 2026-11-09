@@ -84,29 +84,16 @@ export async function checkAvailabilityOverlap(
 }
 
 /**
- * Crea un nuevo horario disponible en la colección 'teacherAvailability'.
- * Guarda teacherId, date, startTime, duration, status: 'available', createdAt y updatedAt.
+ * @deprecated [LEGACY] La creación de horarios disponibles puntuales ha sido descontinuada.
+ * MusicKids utiliza exclusivamente horarios recurrentes semanales (teacherRecurringSlots)
+ * para la contratación de abonos mensuales.
  */
 export async function createTeacherAvailability(
   payload: CreateAvailabilityPayload
 ): Promise<string> {
-  const path = 'teacherAvailability';
-  try {
-    const availabilityData = {
-      teacherId: payload.teacherId,
-      date: payload.date.trim(),
-      startTime: payload.startTime.trim(),
-      duration: payload.duration,
-      status: 'available' as const,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    };
-
-    const docRef = await addDoc(collection(db, path), availabilityData);
-    return docRef.id;
-  } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, path);
-  }
+  throw new Error(
+    'PUNCTUAL_SLOTS_DEPRECATED: La creación de horarios puntuales ha sido descontinuada. Utilice createRecurringSlot para configurar horarios semanales recurrentes.'
+  );
 }
 
 /**
@@ -171,6 +158,9 @@ export async function getTeacherAvailability(
         startTime: data.startTime,
         duration: data.duration,
         status: data.status,
+        lessonId: data.lessonId,
+        meetUrl: data.meetUrl,
+        meetSpaceName: data.meetSpaceName,
         createdAt: data.createdAt,
         updatedAt: data.updatedAt,
       });

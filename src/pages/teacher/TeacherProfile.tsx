@@ -17,6 +17,7 @@ import {
   fetchUserProfile,
 } from '../../services/authService';
 import type { TeacherInstrument } from '../../types/auth';
+import { TeacherBankDetailsSection } from '../../components/teacher/TeacherBankDetailsSection';
 
 interface TeacherProfileProps {
   onNavigate: (path: string) => void;
@@ -552,6 +553,11 @@ export const TeacherProfile: React.FC<TeacherProfileProps> = ({ onNavigate }) =>
             </form>
           )}
         </div>
+
+        {/* SECCIÓN DE DATOS BANCARIOS PARA TRANSFERENCIAS (Solo Profesor - Subbloque 6B.1) */}
+        {isTeacher && user?.uid && (
+          <TeacherBankDetailsSection teacherId={user.uid} />
+        )}
       </main>
 
       {/* FOOTER SIMPLE DE IDENTIDAD */}

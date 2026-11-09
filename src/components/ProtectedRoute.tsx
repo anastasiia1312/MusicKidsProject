@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { LoadingScreen } from './common/LoadingScreen';
 import { AccountDisabledScreen } from './common/AccountDisabledScreen';
@@ -14,6 +14,22 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 }) => {
   const { user, role, loading, isAccountDisabled, pendingGoogleUser } = useAuth();
 
+  useEffect(() => {
+    if (loading) return;
+
+    if (user && isAccountDisabled) return;
+
+    if (!user && !pendingGoogleUser) {
+      onRedirect('/login');
+      return;
+    }
+
+    // Si el usuario inició sesión pero aún no tiene rol guardado en Firestore
+    if (!role && (pendingGoogleUser || user)) {
+      onRedirect('/select-role');
+    }
+  }, [loading, user, isAccountDisabled, pendingGoogleUser, role, onRedirect]);
+
   if (loading) {
     return <LoadingScreen message="Verificando sesión en MusicKids..." />;
   }
@@ -24,13 +40,11 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   }
 
   if (!user && !pendingGoogleUser) {
-    onRedirect('/login');
     return null;
   }
 
   // Si el usuario inició sesión pero aún no tiene rol guardado en Firestore
   if (!role && (pendingGoogleUser || user)) {
-    onRedirect('/select-role');
     return null;
   }
 

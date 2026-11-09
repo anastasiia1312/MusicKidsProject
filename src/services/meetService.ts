@@ -1,4 +1,10 @@
-import { GoogleAuthProvider, signInWithPopup, browserPopupRedirectResolver } from 'firebase/auth';
+import {
+  GoogleAuthProvider,
+  signInWithPopup,
+  linkWithPopup,
+  reauthenticateWithPopup,
+  browserPopupRedirectResolver,
+} from 'firebase/auth';
 import { auth } from './firebase';
 
 const MEET_SCOPE = 'https://www.googleapis.com/auth/meetings.space.created';
@@ -8,10 +14,19 @@ let cachedMeetToken: string | null = null;
 let tokenExpiresAt = 0;
 
 /**
- * Obtiene un token de acceso OAuth con los permisos necesarios para Google Meet API
+ * Limpia la caché en memoria del token de Google Meet
+ */
+export function resetMeetTokenCache(): void {
+  cachedMeetToken = null;
+  tokenExpiresAt = 0;
+}
+
+/**
+ * Obtiene un token de acceso OAuth con los permisos necesarios para Google Meet API,
+ * preservando de forma segura la sesión del usuario actual en Firebase Auth.
  */
 export async function getGoogleMeetAccessToken(): Promise<string> {
-  // Verificar si hay un token válido en memoria (con 2 minutos de margen)
+  // Verificar si hay un token válido en memoria (con 2 minutos de margen de expiración)
   if (cachedMeetToken && Date.now() < tokenExpiresAt - 120000) {
     return cachedMeetToken;
   }
@@ -23,13 +38,53 @@ export async function getGoogleMeetAccessToken(): Promise<string> {
     access_type: 'offline',
   });
 
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new Error('Debes iniciar sesión para autorizar Google Meet.');
+  }
+
+  const originalUid = currentUser.uid;
+
   try {
-    const result = await signInWithPopup(auth, provider, browserPopupRedirectResolver);
+    let result;
+    const isGoogleLinked = currentUser.providerData.some(
+      (p) => p.providerId === GoogleAuthProvider.PROVIDER_ID
+    );
+
+    if (isGoogleLinked) {
+      // Si el proveedor de Google ya está vinculado, reautenticar para refrescar el token de Meet
+      try {
+        result = await reauthenticateWithPopup(currentUser, provider, browserPopupRedirectResolver);
+      } catch (reauthError: any) {
+        console.warn('Reautenticación con Google falló, intentando enlace alternativo:', reauthError);
+        result = await linkWithPopup(currentUser, provider, browserPopupRedirectResolver);
+      }
+    } else {
+      // Intentar vincular la cuenta de Google al usuario autenticado actual sin cerrar su sesión
+      try {
+        result = await linkWithPopup(currentUser, provider, browserPopupRedirectResolver);
+      } catch (linkError: any) {
+        if (linkError.code === 'auth/provider-already-linked') {
+          result = await reauthenticateWithPopup(currentUser, provider, browserPopupRedirectResolver);
+        } else if (linkError.code === 'auth/credential-already-in-use') {
+          // La credencial de Google ya está registrada en otra cuenta de Firebase
+          console.warn('La credencial de Google ya existe en otra cuenta. Obteniendo token con signInWithPopup...');
+          result = await signInWithPopup(auth, provider, browserPopupRedirectResolver);
+        } else {
+          throw linkError;
+        }
+      }
+    }
+
     const credential = GoogleAuthProvider.credentialFromResult(result);
     const accessToken = credential?.accessToken;
 
     if (!accessToken) {
       throw new Error('No se pudo obtener el token de acceso de Google Meet.');
+    }
+
+    if (auth.currentUser && auth.currentUser.uid !== originalUid) {
+      console.warn('Aviso: La sesión de Firebase Auth cambió de UID durante la autorización.');
     }
 
     cachedMeetToken = accessToken;
@@ -66,6 +121,10 @@ export async function createGoogleMeetSpace(): Promise<GoogleMeetSpaceResult> {
     });
 
     if (!response.ok) {
+      if (response.status === 401) {
+        cachedMeetToken = null;
+        tokenExpiresAt = 0;
+      }
       const errorText = await response.text();
       console.error(`Error Google Meet API [${response.status}]:`, errorText);
       throw new Error(`Google Meet API error HTTP ${response.status}`);

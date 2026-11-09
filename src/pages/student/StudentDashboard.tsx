@@ -17,6 +17,8 @@ import {
   Clock,
   Video,
   ArrowRight,
+  Compass,
+  Sparkles,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { getStudentLessons } from '../../services/lessonService';
@@ -284,6 +286,20 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
               {!isSidebarCollapsed && <span>Mis Clases</span>}
             </div>
 
+            {/* 3. Buscar profesores */}
+            <div
+              id="sidebar-item-buscar-profesores"
+              title="Buscar profesores"
+              aria-label="Buscar profesores"
+              onClick={() => onNavigate('/student/teachers')}
+              className={`flex items-center ${
+                isSidebarCollapsed ? 'justify-center p-3' : 'gap-3.5 px-4 py-3'
+              } rounded-2xl text-slate-700 hover:bg-[#E8F3F8] hover:text-[#00537A] font-semibold text-sm cursor-pointer transition-colors group`}
+            >
+              <Compass className="w-5 h-5 text-slate-500 group-hover:text-[#00537A] shrink-0" />
+              {!isSidebarCollapsed && <span>Buscar profesores</span>}
+            </div>
+
             {/* 3. Tareas (Próximamente) */}
             <div
               id="sidebar-item-tareas"
@@ -345,6 +361,41 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
 
         {/* ÁREA PRINCIPAL: PRÓXIMAS CLASES DEL ALUMNO */}
         <main className="flex-1 min-w-0 w-full flex flex-col gap-6 transition-all duration-200 ease-in-out">
+          {/* BANNER DESTACADO: BUSCAR PROFESORES */}
+          <div
+            id="student-search-teachers-banner"
+            className="bg-linear-to-r from-[#00537A] to-[#08638F] text-white rounded-[24px] p-5 sm:p-6 shadow-xs border border-white/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 relative overflow-hidden"
+          >
+            <div className="relative z-10 max-w-xl">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/15 text-[#FFEAA7] text-xs font-bold mb-2">
+                <Sparkles className="w-3.5 h-3.5 text-[#FFB800]" />
+                <span>Catálogo de Clases Particulares</span>
+              </div>
+              <h3
+                className="font-parkinsans text-xl sm:text-2xl font-bold tracking-tight text-white"
+                style={{ fontFamily: "'Parkinsans', sans-serif" }}
+              >
+                ¿Buscás un nuevo profesor de música?
+              </h3>
+              <p
+                className="font-siemreap text-white/85 text-xs sm:text-sm mt-1"
+                style={{ fontFamily: "'Siemreap', sans-serif" }}
+              >
+                Conocé a los profesores de música disponibles en MusicKids.
+              </p>
+            </div>
+
+            <button
+              id="btn-search-teachers-main"
+              type="button"
+              onClick={() => onNavigate('/student/teachers')}
+              className="relative z-10 bg-[#FFB800] hover:bg-[#FAB816] active:scale-95 text-[#00537A] font-bold text-xs sm:text-sm px-5 sm:px-6 py-2.5 sm:py-3 rounded-full shadow-md transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 shrink-0"
+            >
+              <Compass className="w-4 h-4 sm:w-5 sm:h-5 text-[#00537A]" />
+              <span>Buscar profesores</span>
+            </button>
+          </div>
+
           {/* Cabecera de la Sección Principal */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>

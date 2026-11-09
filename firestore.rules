@@ -69,6 +69,29 @@ service cloud.firestore {
                     
       // Prohibir la eliminación de documentos de usuarios desde el cliente en este MVP
       allow delete: if false;
+
+      // Subcolección privada para configuraciones sensibles del profesor (Sala permanente de Google Meet)
+      // Acceso estrictamente restringido al propio profesor titular activo (Subbloque 4)
+      match /privateSettings/{docId} {
+        // Solo el profesor activo titular puede leer su configuración privada
+        allow read: if isSignedIn() 
+                    && request.auth.uid == userId 
+                    && isActiveUser() 
+                    && currentUserData().get('role', '') == 'teacher';
+
+        // Solo el profesor activo titular puede escribir/actualizar su configuración de meetConfig
+        // Validando el esquema, inmutabilidad de teacherId y formato de permanentMeetUrl
+        allow write: if isSignedIn() 
+                     && request.auth.uid == userId 
+                     && isActiveUser() 
+                     && currentUserData().get('role', '') == 'teacher'
+                     && docId == 'meetConfig'
+                     && request.resource.data.teacherId == userId
+                     && request.resource.data.permanentMeetUrl is string
+                     && request.resource.data.permanentMeetUrl.size() > 24
+                     && request.resource.data.permanentMeetUrl.matches('https://meet\\.google\\.com/.*')
+                     && request.resource.data.permanentMeetSpaceName is string;
+      }
     }
 
     // Reglas para la colección de disponibilidad de profesores (teacherAvailability)
@@ -82,10 +105,26 @@ service cloud.firestore {
                     && currentUserData().get('role', '') == 'teacher'
                     && request.resource.data.status in ['available', 'booked'];
 
-      // Solo el profesor dueño activo puede modificar su franja (teacherId inmutable)
-      allow update: if isActiveUser()
-                    && resource.data.teacherId == request.auth.uid
-                    && request.resource.data.teacherId == request.auth.uid;
+      // Permitir actualización:
+      // 1. El propio profesor dueño activo actualiza su franja (teacherId inmutable)
+      // 2. Un alumno activo reserva un horario disponible: cambia status a 'booked' y registra lessonId, preservando teacherId, date, startTime y duration
+      allow update: if isActiveUser() && (
+        (
+          resource.data.teacherId == request.auth.uid &&
+          request.resource.data.teacherId == request.auth.uid
+        )
+        ||
+        (
+          currentUserData().get('role', '') == 'student' &&
+          resource.data.status == 'available' &&
+          request.resource.data.status == 'booked' &&
+          request.resource.data.teacherId == resource.data.teacherId &&
+          request.resource.data.date == resource.data.date &&
+          request.resource.data.startTime == resource.data.startTime &&
+          request.resource.data.duration == resource.data.duration &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'lessonId', 'updatedAt'])
+        )
+      );
 
       // Solo el profesor dueño activo puede eliminar su franja
       allow delete: if isActiveUser() && resource.data.teacherId == request.auth.uid;
@@ -99,11 +138,24 @@ service cloud.firestore {
         resource.data.studentId == request.auth.uid
       );
       
-      // Solo un profesor activo puede crear clases asignándose a sí mismo como teacherId
-      allow create: if isActiveUser() 
-                    && request.resource.data.teacherId == request.auth.uid
-                    && currentUserData().get('role', '') == 'teacher'
-                    && request.resource.data.status in ['scheduled', 'in_progress', 'completed', 'cancelled'];
+      // Permitir crear clases:
+      // 1. Profesor activo crea una clase asignándose como teacherId
+      // 2. Alumno activo reserva una clase asignándose como studentId, con status 'scheduled' y hacia un profesor existente y activo
+      allow create: if isActiveUser() && (
+        (
+          request.resource.data.teacherId == request.auth.uid &&
+          currentUserData().get('role', '') == 'teacher' &&
+          request.resource.data.status in ['scheduled', 'in_progress', 'completed', 'cancelled']
+        )
+        ||
+        (
+          currentUserData().get('role', '') == 'student' &&
+          request.resource.data.studentId == request.auth.uid &&
+          request.resource.data.status == 'scheduled' &&
+          exists(/databases/$(database)/documents/users/$(request.resource.data.teacherId)) &&
+          get(/databases/$(database)/documents/users/$(request.resource.data.teacherId)).data.get('role', '') == 'teacher'
+        )
+      );
                     
       // Solo el profesor creador activo puede actualizar o eliminar la clase
       allow update: if isActiveUser() 
@@ -121,5 +173,49 @@ service cloud.firestore {
           );
       }
     }
+
+    // Reglas para la colección de horarios recurrentes de profesores (teacherRecurringSlots)
+    match /teacherRecurringSlots/{slotId} {
+      // Cualquier usuario activo puede consultar horarios recurrentes de profesores
+      allow read: if isActiveUser();
+
+      // Solo un profesor activo puede crear reglas de horarios recurrentes asignándose a sí mismo
+      allow create: if isActiveUser()
+                    && request.resource.data.teacherId == request.auth.uid
+                    && currentUserData().get('role', '') == 'teacher'
+                    && request.resource.data.dayOfWeek >= 0 && request.resource.data.dayOfWeek <= 6
+                    && request.resource.data.duration in [30, 45, 60]
+                    && request.resource.data.isActive is bool;
+
+      // Solo el profesor dueño activo puede modificar sus reglas de horarios recurrentes
+      allow update: if isActiveUser()
+                    && resource.data.teacherId == request.auth.uid
+                    && request.resource.data.teacherId == request.auth.uid;
+
+      // Solo el profesor dueño activo puede eliminar sus reglas de horarios recurrentes
+      allow delete: if isActiveUser() && resource.data.teacherId == request.auth.uid;
+    }
+
+    // Reglas para la colección de excepciones de disponibilidad y vacaciones (teacherScheduleExceptions)
+    match /teacherScheduleExceptions/{exceptionId} {
+      // Cualquier usuario activo puede consultar las excepciones de profesores (necesario para visualizar y reservar)
+      allow read: if isActiveUser();
+
+      // Solo un profesor activo puede crear excepciones asignadas a sí mismo
+      allow create: if isActiveUser()
+                    && request.resource.data.teacherId == request.auth.uid
+                    && currentUserData().get('role', '') == 'teacher'
+                    && request.resource.data.type in ['blocked_date', 'blocked_slot', 'vacation']
+                    && request.resource.data.startDate <= request.resource.data.endDate;
+
+      // Solo el profesor dueño activo puede modificar sus excepciones
+      allow update: if isActiveUser()
+                    && resource.data.teacherId == request.auth.uid
+                    && request.resource.data.teacherId == request.auth.uid;
+
+      // Solo el profesor dueño activo puede eliminar sus excepciones (restablecer disponibilidad)
+      allow delete: if isActiveUser() && resource.data.teacherId == request.auth.uid;
+    }
   }
 }
+

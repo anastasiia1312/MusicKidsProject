@@ -8,11 +8,11 @@ import {
   AlertCircle,
   Loader2,
   DollarSign,
-  Calendar,
 } from 'lucide-react';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../services/firebase';
 import { useAuth } from '../../context/AuthContext';
+import { MonthlyBookingSection } from '../../components/student/MonthlyBookingSection';
 import type { MonthlyPlan } from '../../types/auth';
 
 interface PublicTeacherProfileProps {
@@ -41,11 +41,14 @@ export const PublicTeacherProfile: React.FC<PublicTeacherProfileProps> = ({
   teacherId,
   onNavigate,
 }) => {
-  const { role } = useAuth();
+  const { role, user, userProfile } = useAuth();
+
+  // Estados del perfil
   const [loading, setLoading] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [teacher, setTeacher] = useState<TeacherPublicData | null>(null);
 
+  // Cargar perfil del profesor
   useEffect(() => {
     let isMounted = true;
 
@@ -123,7 +126,7 @@ export const PublicTeacherProfile: React.FC<PublicTeacherProfileProps> = ({
     if (window.history.length > 1) {
       window.history.back();
     } else {
-      onNavigate(role === 'teacher' ? '/teacher/dashboard' : '/student/dashboard');
+      onNavigate(role === 'teacher' ? '/teacher/dashboard' : '/student/teachers');
     }
   };
 
@@ -222,10 +225,9 @@ export const PublicTeacherProfile: React.FC<PublicTeacherProfileProps> = ({
             {/* Cabecera del Perfil con Foto y Nombre */}
             <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/80 shadow-xs">
               <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
-                {/* Avatar / Placeholder del Profesor (Carga temporalmente desactivada) */}
+                {/* Avatar / Placeholder del Profesor */}
                 <div className="relative shrink-0">
                   <div className="w-28 h-28 sm:w-32 sm:h-32 rounded-full overflow-hidden bg-[#00537A] text-white flex items-center justify-center font-bold text-4xl sm:text-5xl border-4 border-[#E8F3F8] shadow-sm select-none">
-                    {/* TODO: Rehabilitar carga de avatar en una iteración futura. */}
                     {teacher.name ? (
                       teacher.name.charAt(0).toUpperCase()
                     ) : (
@@ -319,7 +321,14 @@ export const PublicTeacherProfile: React.FC<PublicTeacherProfileProps> = ({
               )}
             </div>
 
-            {/* Tarifas */}
+            {/* SECCIÓN: Abono Mensual Recurrente - Selección y Vista Previa (Subbloque 6A y 6B.2) */}
+            <MonthlyBookingSection
+              teacherId={teacherId.trim()}
+              teacherName={teacher.name}
+              monthlyPlans={teacher.monthlyPlans}
+            />
+
+            {/* SECCIÓN: Tarifas */}
             {(() => {
               const hasSinglePrice =
                 typeof teacher.singleLessonPrice === 'number' &&
@@ -435,3 +444,4 @@ export const PublicTeacherProfile: React.FC<PublicTeacherProfileProps> = ({
     </div>
   );
 };
+

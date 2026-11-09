@@ -1,0 +1,31 @@
+// Propuesta de Firestore Security Rules para SUBBLOQUE 6B
+// (Abonos Mensuales y Cerrojos de Concurrencia)
+//
+// NOTA DE SEGURIDAD (FASE 1):
+// - La creación de abonos mensuales debe realizarse EXCLUSIVAMENTE a través de la Cloud Function
+//   o transacción del servidor (Firebase Admin SDK).
+// - El cliente no puede crear directamente documentos en 'monthlyBookings' ni 'teacherSlotLocks'.
+// - Alumnos y profesores solo pueden LEER sus propios abonos mensuales.
+
+/*
+    // Reglas para la colección de abonos mensuales (monthlyBookings)
+    match /monthlyBookings/{bookingId} {
+      // Solo el profesor titular o el alumno asignado y activos pueden consultar el abono
+      allow read: if isActiveUser() && (
+        resource.data.teacherId == request.auth.uid ||
+        resource.data.studentId == request.auth.uid
+      );
+
+      // La creación y actualización directa desde el cliente están BLOQUEADAS.
+      // Toda confirmación debe procesarse mediante la Cloud Function 'confirmMonthlyBooking'
+      // con Firebase Admin SDK para garantizar la atomicidad y el recálculo en el servidor.
+      allow create, update, delete: if false;
+    }
+
+    // Reglas para la colección de cerrojos de concurrencia (teacherSlotLocks)
+    match /teacherSlotLocks/{lockKey} {
+      // Los cerrojos deterministas son gestionados exclusivamente por el backend transaccional.
+      allow read: if isActiveUser();
+      allow write: if false;
+    }
+*/
