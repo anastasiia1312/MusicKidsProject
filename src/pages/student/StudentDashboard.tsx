@@ -19,9 +19,11 @@ import {
   ArrowRight,
   Compass,
   Sparkles,
+  Headphones,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { getStudentLessons } from '../../services/lessonService';
+import { subscribeToUserSupportCount } from '../../services/supportService';
 import {
   getLessonTimingLabel,
   formatLessonDateTime,
@@ -39,6 +41,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [loadingLessons, setLoadingLessons] = useState(true);
   const [lessonsError, setLessonsError] = useState<string | null>(null);
+  const [unreadSupportCount, setUnreadSupportCount] = useState<number>(0);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
 
@@ -60,6 +63,14 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
 
   useEffect(() => {
     loadStudentLessons();
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    const unsubscribe = subscribeToUserSupportCount(user.uid, (count) => {
+      setUnreadSupportCount(count);
+    });
+    return () => unsubscribe();
   }, [user?.uid]);
 
   const handleLogout = async () => {
@@ -336,6 +347,27 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
               {!isSidebarCollapsed && (
                 <span className="bg-[#FFEAA7] text-[#7A5A00] text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
                   Próximamente
+                </span>
+              )}
+            </div>
+
+            {/* 5. Soporte Técnico */}
+            <div
+              id="sidebar-item-soporte"
+              title="Soporte técnico"
+              aria-label="Soporte técnico"
+              onClick={() => onNavigate('/student/support')}
+              className={`flex items-center ${
+                isSidebarCollapsed ? 'justify-center p-3' : 'justify-between px-4 py-3'
+              } rounded-2xl text-slate-700 hover:bg-[#E8F3F8] hover:text-[#00537A] font-semibold text-sm cursor-pointer transition-colors group`}
+            >
+              <div className={`flex items-center ${isSidebarCollapsed ? 'justify-center' : 'gap-3.5'}`}>
+                <Headphones className="w-5 h-5 text-slate-500 group-hover:text-[#00537A] shrink-0" />
+                {!isSidebarCollapsed && <span>Soporte técnico</span>}
+              </div>
+              {unreadSupportCount > 0 && !isSidebarCollapsed && (
+                <span className="bg-[#FFB800] text-[#7A5A00] text-[10px] font-extrabold px-2 py-0.5 rounded-full shadow-2xs">
+                  {unreadSupportCount}
                 </span>
               )}
             </div>

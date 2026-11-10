@@ -8,6 +8,9 @@ import { CreateLesson } from './pages/teacher/CreateLesson';
 import { TeacherProfile } from './pages/teacher/TeacherProfile';
 import { TeacherRates } from './pages/teacher/TeacherRates';
 import { TeacherAvailability } from './pages/teacher/TeacherAvailability';
+import { TeacherStats } from './pages/teacher/TeacherStats';
+import { UserSupportPage } from './pages/support/UserSupportPage';
+import { AdminSupportPage } from './pages/admin/AdminSupportPage';
 import { StudentDashboard } from './pages/student/StudentDashboard';
 import { LessonPage } from './pages/LessonPage';
 import { LandingPage } from './pages/LandingPage';
@@ -34,10 +37,16 @@ function AppContent() {
       pathname === '/teacher/dashboard' ||
       pathname === '/teacher/lessons/new' ||
       pathname === '/teacher/profile' ||
+      pathname === '/teacher/rates' ||
+      pathname === '/teacher/availability' ||
+      pathname === '/teacher/stats' ||
+      pathname === '/teacher/support' ||
       pathname === '/student/profile' ||
       pathname === '/profile' ||
       pathname === '/student/dashboard' ||
+      pathname === '/student/support' ||
       pathname === '/admin/dashboard' ||
+      pathname === '/admin/support' ||
       pathname.startsWith('/lesson/') ||
       pathname.startsWith('/teacher/') ||
       pathname.startsWith('/student/') ||
@@ -146,7 +155,9 @@ function AppContent() {
     currentPath !== '/teacher/lessons/new' &&
     currentPath !== '/teacher/profile' &&
     currentPath !== '/teacher/rates' &&
-    currentPath !== '/teacher/availability'
+    currentPath !== '/teacher/availability' &&
+    currentPath !== '/teacher/stats' &&
+    currentPath !== '/teacher/support'
   ) {
     const teacherId = currentPath.replace('/teacher/', '').split('/')[0];
     return (
@@ -161,7 +172,8 @@ function AppContent() {
     currentPath.startsWith('/student/') &&
     currentPath !== '/student/dashboard' &&
     currentPath !== '/student/profile' &&
-    currentPath !== '/student/teachers'
+    currentPath !== '/student/teachers' &&
+    currentPath !== '/student/support'
   ) {
     const studentId = currentPath.replace('/student/', '').split('/')[0];
     return (
@@ -217,6 +229,27 @@ function AppContent() {
         </RoleRoute>
       );
 
+    case '/teacher/stats':
+      return (
+        <RoleRoute allowedRole="teacher" onRedirect={navigate}>
+          <TeacherStats onNavigate={navigate} />
+        </RoleRoute>
+      );
+
+    case '/teacher/support':
+      return (
+        <RoleRoute allowedRole="teacher" onRedirect={navigate}>
+          <UserSupportPage onNavigate={navigate} />
+        </RoleRoute>
+      );
+
+    case '/student/support':
+      return (
+        <RoleRoute allowedRole="student" onRedirect={navigate}>
+          <UserSupportPage onNavigate={navigate} />
+        </RoleRoute>
+      );
+
     case '/student/profile':
       return (
         <RoleRoute allowedRole="student" onRedirect={navigate}>
@@ -263,6 +296,13 @@ function AppContent() {
       return (
         <RoleRoute allowedRole="admin" onRedirect={navigate}>
           <AdminDashboard onNavigate={navigate} />
+        </RoleRoute>
+      );
+
+    case '/admin/support':
+      return (
+        <RoleRoute allowedRole="admin" onRedirect={navigate}>
+          <AdminSupportPage onNavigate={navigate} />
         </RoleRoute>
       );
 

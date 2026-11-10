@@ -18,8 +18,10 @@ import {
   Unlock,
   CheckCircle2,
   AlertTriangle,
+  Headphones,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { subscribeToAdminSupportCounts } from '../../services/supportService';
 import type { UserProfile, UserStatus } from '../../types/auth';
 import {
   fetchAllUsers,
@@ -64,6 +66,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     type: 'success' | 'error';
     message: string;
   } | null>(null);
+
+  const [adminSupportCounts, setAdminSupportCounts] = useState({ pending: 0, unread: 0, total: 0 });
+
+  useEffect(() => {
+    const unsub = subscribeToAdminSupportCounts(setAdminSupportCounts);
+    return () => unsub();
+  }, []);
 
   // Cargar usuarios desde Firestore
   const loadUsers = async () => {
@@ -249,6 +258,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
             <ShieldCheck className="w-3.5 h-3.5" />
             <span>Administrador</span>
           </div>
+        </div>
+
+        {/* Navegación de secciones del Administrador */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onNavigate('/admin/dashboard')}
+            className="px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-bold bg-[#00537A] text-white shadow-2xs transition-colors"
+          >
+            Usuarios
+          </button>
+          <button
+            type="button"
+            onClick={() => onNavigate('/admin/support')}
+            className="px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-bold text-slate-700 hover:bg-white hover:text-[#00537A] transition-colors flex items-center gap-1.5 cursor-pointer"
+          >
+            <Headphones className="w-3.5 h-3.5" />
+            <span>Soporte</span>
+            {adminSupportCounts.pending > 0 && (
+              <span className="bg-[#FFB800] text-[#7A5A00] text-[10px] font-extrabold px-1.5 py-0.2 rounded-full">
+                {adminSupportCounts.pending}
+              </span>
+            )}
+          </button>
         </div>
 
         {/* Bloque Derecho: Info del Admin + Botón Cerrar Sesión */}

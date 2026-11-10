@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Home,
   Calendar,
   FileText,
   Folder,
   BarChart2,
+  Headphones,
   LogOut,
   User,
   Bell,
@@ -13,10 +14,11 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { subscribeToUserSupportCount } from '../../services/supportService';
 
 export interface TeacherLayoutProps {
   children: React.ReactNode;
-  activeSection: 'dashboard' | 'classes' | 'tasks' | 'materials' | 'stats';
+  activeSection: 'dashboard' | 'classes' | 'tasks' | 'materials' | 'stats' | 'support';
   onNavigate: (path: string) => void;
   onRefreshData?: () => void;
 }
@@ -30,6 +32,15 @@ export const TeacherLayout: React.FC<TeacherLayoutProps> = ({
   const { userProfile, user, logout } = useAuth();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
+  const [unreadSupportCount, setUnreadSupportCount] = useState<number>(0);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    const unsubscribe = subscribeToUserSupportCount(user.uid, (count) => {
+      setUnreadSupportCount(count);
+    });
+    return () => unsubscribe();
+  }, [user?.uid]);
 
   const handleLogout = async () => {
     try {
@@ -337,25 +348,58 @@ export const TeacherLayout: React.FC<TeacherLayoutProps> = ({
               )}
             </div>
 
-            {/* 5. Estadísticas (Próximamente) */}
-            <div
+            {/* 5. Estadísticas */}
+            <button
+              type="button"
               id="sidebar-item-estadisticas"
-              title="Estadísticas (Próximamente)"
-              aria-label="Estadísticas (Próximamente)"
-              className={`flex items-center ${
+              title="Estadísticas"
+              aria-label="Estadísticas"
+              onClick={() => onNavigate('/teacher/stats')}
+              className={`w-full flex items-center ${
+                isSidebarCollapsed ? 'justify-center p-3' : 'gap-3.5 px-4 py-3'
+              } rounded-2xl ${
+                activeSection === 'stats'
+                  ? 'bg-[#E8F3F8] text-[#00537A] font-bold'
+                  : 'text-slate-700 hover:bg-slate-50 hover:text-[#00537A] font-semibold'
+              } text-sm cursor-pointer transition-colors text-left`}
+            >
+              <BarChart2
+                className={`w-5 h-5 ${
+                  activeSection === 'stats' ? 'text-[#00537A]' : 'text-slate-500'
+                } shrink-0`}
+              />
+              {!isSidebarCollapsed && <span>Estadísticas</span>}
+            </button>
+
+            {/* 6. Soporte Técnico */}
+            <button
+              type="button"
+              id="sidebar-item-soporte"
+              title="Soporte técnico"
+              aria-label="Soporte técnico"
+              onClick={() => onNavigate('/teacher/support')}
+              className={`w-full flex items-center ${
                 isSidebarCollapsed ? 'justify-center p-3' : 'justify-between px-4 py-3'
-              } rounded-2xl text-slate-600 font-semibold text-sm cursor-default hover:bg-slate-50/60 transition-colors`}
+              } rounded-2xl ${
+                activeSection === 'support'
+                  ? 'bg-[#E8F3F8] text-[#00537A] font-bold'
+                  : 'text-slate-700 hover:bg-slate-50 hover:text-[#00537A] font-semibold'
+              } text-sm cursor-pointer transition-colors text-left`}
             >
               <div className={`flex items-center ${isSidebarCollapsed ? 'justify-center' : 'gap-3.5'}`}>
-                <BarChart2 className="w-5 h-5 text-slate-400 shrink-0" />
-                {!isSidebarCollapsed && <span>Estadísticas</span>}
+                <Headphones
+                  className={`w-5 h-5 ${
+                    activeSection === 'support' ? 'text-[#00537A]' : 'text-slate-500'
+                  } shrink-0`}
+                />
+                {!isSidebarCollapsed && <span>Soporte técnico</span>}
               </div>
-              {!isSidebarCollapsed && (
-                <span className="bg-[#FFEAA7] text-[#7A5A00] text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                  Próximamente
+              {unreadSupportCount > 0 && !isSidebarCollapsed && (
+                <span className="bg-[#FFB800] text-[#7A5A00] text-[10px] font-extrabold px-2 py-0.5 rounded-full shadow-2xs">
+                  {unreadSupportCount}
                 </span>
               )}
-            </div>
+            </button>
           </nav>
 
           {/* Navegación Inferior: Cerrar sesión */}

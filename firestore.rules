@@ -255,6 +255,75 @@ service cloud.firestore {
     match /teacherDailySchedule/{scheduleId} {
       allow read, write: if false;
     }
+
+    // Reglas para el Sistema de Soporte Técnico (Bloque 8)
+    match /supportTickets/{ticketId} {
+      // Lectura: Administradores activos pueden leer todas las solicitudes;
+      // Alumnos y profesores activos solo pueden consultar sus propios tickets (userId == request.auth.uid).
+      allow read: if isActiveAdmin() || (isActiveUser() && resource.data.userId == request.auth.uid);
+
+      // Creación: Solo usuarios activos (student o teacher) creando un ticket con su propio UID.
+      // Se validan campos obligatorios, estado inicial 'pending', inmutabilidad del rol y longitudes.
+      allow create: if isActiveUser()
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.userRole in ['student', 'teacher']
+                    && request.resource.data.userRole == currentUserData().get('role', '')
+                    && request.resource.data.status == 'pending'
+                    && request.resource.data.subject is string
+                    && request.resource.data.subject.size() >= 3
+                    && request.resource.data.subject.size() <= 120
+                    && request.resource.data.description is string
+                    && request.resource.data.description.size() >= 10
+                    && request.resource.data.description.size() <= 3000;
+
+      // Actualización:
+      // Vía 1: Administradores activos pueden gestionar estados ('pending', 'in_progress', 'resolved') y banderas.
+      // Vía 2: Usuarios titulares activos solo pueden actualizar banderas de lectura y contadores de mensajes.
+      // Se prohíbe terminantemente cambiar el dueño (userId) o auto-marcarse como resuelto.
+      allow update: if isActiveAdmin() || (
+        isActiveUser()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.userRole == resource.data.userRole
+        && request.resource.data.status == resource.data.status
+      );
+
+      // Eliminación prohibida en esta versión (conservación histórica)
+      allow delete: if false;
+
+      // Subcolección de mensajes del ticket
+      match /messages/{messageId} {
+        // Lectura: Administradores activos o el usuario titular activo del ticket
+        allow read: if isActiveAdmin() 
+                    || (isActiveUser() && get(/databases/$(database)/documents/supportTickets/$(ticketId)).data.userId == request.auth.uid);
+
+        // Creación de mensajes:
+        // - Admin activo puede responder en cualquier ticket.
+        // - Usuario dueño activo puede responder exclusivamente si el ticket NO está resuelto.
+        // - Inmutabilidad del remitente: senderId == request.auth.uid
+        allow create: if (
+          isActiveAdmin()
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.senderRole == 'admin'
+          && request.resource.data.content is string
+          && request.resource.data.content.size() >= 1
+          && request.resource.data.content.size() <= 3000
+        ) || (
+          isActiveUser()
+          && get(/databases/$(database)/documents/supportTickets/$(ticketId)).data.userId == request.auth.uid
+          && get(/databases/$(database)/documents/supportTickets/$(ticketId)).data.status != 'resolved'
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.senderRole in ['student', 'teacher']
+          && request.resource.data.senderRole == currentUserData().get('role', '')
+          && request.resource.data.content is string
+          && request.resource.data.content.size() >= 1
+          && request.resource.data.content.size() <= 3000
+        );
+
+        // Los mensajes son estrictamente inmutables
+        allow update, delete: if false;
+      }
+    }
   }
 }
 
