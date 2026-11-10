@@ -30,11 +30,15 @@ export interface Lesson {
 
 export interface CreateLessonPayload {
   title: string;
-  teacherId: string;
+  teacherId?: string;
   studentId: string;
-  date: Timestamp;
-  duration: number;
+  date: Timestamp | Date | any;
+  duration?: number;
   monthlyBookingId?: string;
   meetUrl?: string;
   meetSpaceName?: string;
+  dateStr?: string;
+  startTime?: string;
+  idempotencyKey?: string;
 }
+

@@ -10,6 +10,7 @@ import {
   type Auth,
 } from 'firebase/auth';
 import { getFirestore, type Firestore } from 'firebase/firestore';
+import { getFunctions, type Functions } from 'firebase/functions';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Inicialización de la instancia de Firebase (Singleton)
@@ -50,5 +51,8 @@ export const db: Firestore =
   configWithDbId.firestoreDatabaseId !== '(default)'
     ? getFirestore(app, configWithDbId.firestoreDatabaseId)
     : getFirestore(app);
+
+// Inicialización de Firebase Cloud Functions en región us-central1
+export const functions: Functions = getFunctions(app, 'us-central1');
 
 export default app;

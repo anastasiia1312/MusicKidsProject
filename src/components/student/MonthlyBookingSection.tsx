@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Calendar,
   Clock,
@@ -13,8 +13,6 @@ import {
   DollarSign,
   X,
 } from 'lucide-react';
-import { collection, getDocs, query, where } from 'firebase/firestore';
-import { db } from '../../services/firebase';
 import { useAuth } from '../../context/AuthContext';
 import type { TeacherRecurringSlot } from '../../types/recurringSchedule';
 import type { TeacherScheduleException } from '../../types/scheduleException';
@@ -32,7 +30,10 @@ import {
   formatExpirationBuenosAires,
   type FixedMonthlyRateResult,
 } from '../../services/monthlyBookingService';
-import { createTemporaryMonthlyBooking } from '../../services/monthlyBookingConfirmationService';
+import {
+  createTemporaryMonthlyBooking,
+  getTeacherPublicAvailability,
+} from '../../services/monthlyBookingConfirmationService';
 import type {
   MonthOption,
   OccurrenceStatus,
@@ -90,6 +91,9 @@ export const MonthlyBookingSection: React.FC<MonthlyBookingSectionProps> = ({
   const [bookingResult, setBookingResult] = useState<TemporaryMonthlyBookingResult | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  // Clave de idempotencia estable por intento de reserva
+  const bookingKeyRef = useRef<string | null>(null);
+
   // Sincronizar planes si las props cambian
   useEffect(() => {
     if (monthlyPlansProp && monthlyPlansProp.length > 0) {
@@ -123,13 +127,26 @@ export const MonthlyBookingSection: React.FC<MonthlyBookingSectionProps> = ({
         return [] as TeacherAvailability[];
       });
 
-      // 4. Cargar bloqueos temporales existentes
-      const locksPromise = getDocs(
-        query(collection(db, 'teacherSlotLocks'), where('teacherId', '==', teacherId))
-      )
-        .then((snap) => snap.docs.map((d) => d.data() as TeacherSlotLock))
+      // 4. Cargar disponibilidad pública sanitizada (sin warning de permisos de teacherSlotLocks)
+      const queryMonth =
+        selectedMonthOption.monthKey ||
+        `${selectedMonthOption.year}-${String(selectedMonthOption.month).padStart(2, '0')}`;
+      const locksPromise = getTeacherPublicAvailability(teacherId, queryMonth)
+        .then((res) => {
+          return (res.occupiedIntervals || []).map((slot) => ({
+            teacherId,
+            date: slot.date,
+            startTime: slot.startTime,
+            endTime: slot.endTime,
+            duration: 45,
+            bookingType: 'monthly' as const,
+            bookingId: 'occupied',
+            studentId: 'occupied',
+            createdAt: null,
+          }));
+        })
         .catch((err) => {
-          console.warn('Advertencia al consultar teacherSlotLocks:', err);
+          console.warn('Advertencia al consultar disponibilidad sanitizada:', err);
           return [] as TeacherSlotLock[];
         });
 
@@ -178,7 +195,7 @@ export const MonthlyBookingSection: React.FC<MonthlyBookingSectionProps> = ({
 
   useEffect(() => {
     loadData();
-  }, [teacherId, monthlyPlansProp]);
+  }, [teacherId, monthlyPlansProp, selectedMonthOption.monthKey]);
 
   // Tarifa fija para la frecuencia semanal actualmente seleccionada (SUBBLOQUE 6B.2)
   const currentFixedRate: FixedMonthlyRateResult = useMemo(() => {
@@ -803,6 +820,59 @@ export const MonthlyBookingSection: React.FC<MonthlyBookingSectionProps> = ({
                   </div>
                 </div>
 
+                {/* Datos bancarios del profesor para la transferencia */}
+                {bookingResult.bankDetails ? (
+                  <div className="p-4 rounded-2xl bg-[#E8F3F8]/80 border border-[#00537A]/30 text-left text-xs space-y-2">
+                    <div className="flex items-center gap-1.5 font-extrabold text-[#00537A] text-xs uppercase tracking-wider">
+                      <DollarSign className="w-4 h-4 text-[#00537A]" />
+                      <span>Datos para realizar la transferencia bancaria:</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                      {bookingResult.bankDetails.alias && (
+                        <div className="p-2.5 rounded-xl bg-white border border-slate-200">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Alias</span>
+                          <span className="font-mono font-bold text-slate-800 text-xs select-all">
+                            {bookingResult.bankDetails.alias}
+                          </span>
+                        </div>
+                      )}
+                      {bookingResult.bankDetails.cbuCvu && (
+                        <div className="p-2.5 rounded-xl bg-white border border-slate-200">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block">CBU / CVU</span>
+                          <span className="font-mono font-bold text-slate-800 text-xs select-all">
+                            {bookingResult.bankDetails.cbuCvu}
+                          </span>
+                        </div>
+                      )}
+                      {bookingResult.bankDetails.accountHolder && (
+                        <div className="p-2.5 rounded-xl bg-white border border-slate-200">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Titular</span>
+                          <span className="font-semibold text-slate-800 text-xs">
+                            {bookingResult.bankDetails.accountHolder}
+                          </span>
+                        </div>
+                      )}
+                      {bookingResult.bankDetails.bankName && (
+                        <div className="p-2.5 rounded-xl bg-white border border-slate-200">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Banco / Entidad</span>
+                          <span className="font-semibold text-slate-800 text-xs">
+                            {bookingResult.bankDetails.bankName}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-[#00537A] font-medium pt-1">
+                      Una vez transferido el importe, el profesor confirmará la recepción del pago y tus clases quedarán activas de forma permanente.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 text-xs text-left">
+                    <p>
+                      Los datos bancarios del profesor serán comunicados para completar la transferencia bancaria y confirmar tu abono.
+                    </p>
+                  </div>
+                )}
+
                 <button
                   type="button"
                   onClick={() => {
@@ -920,18 +990,28 @@ export const MonthlyBookingSection: React.FC<MonthlyBookingSectionProps> = ({
                       setIsSubmitting(true);
                       setSubmitError(null);
 
+                      if (!bookingKeyRef.current) {
+                        bookingKeyRef.current = `mb_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+                      }
+
                       try {
+                        const targetMonthKey =
+                          selectedMonthOption.monthKey ||
+                          `${selectedMonthOption.year}-${String(selectedMonthOption.month).padStart(2, '0')}`;
+
                         const result = await createTemporaryMonthlyBooking(
                           {
                             teacherId,
-                            month: selectedMonthOption.monthKey,
+                            month: targetMonthKey,
                             recurringSlotIds: selectedRuleIds,
                             weeklyFrequency: targetFrequency,
+                            idempotencyKey: bookingKeyRef.current,
                           },
                           user.uid
                         );
 
                         if (result.success) {
+                          bookingKeyRef.current = null;
                           setBookingResult(result);
                         } else {
                           setSubmitError(result.message);

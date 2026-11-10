@@ -79,18 +79,34 @@ service cloud.firestore {
                     && isActiveUser() 
                     && currentUserData().get('role', '') == 'teacher';
 
-        // Solo el profesor activo titular puede escribir/actualizar su configuración de meetConfig
-        // Validando el esquema, inmutabilidad de teacherId y formato de permanentMeetUrl
+        // Solo el profesor activo titular puede escribir/actualizar su configuración de meetConfig o bankDetails
+        // Validando el esquema, inmutabilidad de teacherId y campos obligatorios (Subbloque 6B.3.3.3)
         allow write: if isSignedIn() 
                      && request.auth.uid == userId 
                      && isActiveUser() 
                      && currentUserData().get('role', '') == 'teacher'
-                     && docId == 'meetConfig'
-                     && request.resource.data.teacherId == userId
-                     && request.resource.data.permanentMeetUrl is string
-                     && request.resource.data.permanentMeetUrl.size() > 24
-                     && request.resource.data.permanentMeetUrl.matches('https://meet\\.google\\.com/.*')
-                     && request.resource.data.permanentMeetSpaceName is string;
+                     && (
+                       (
+                         docId == 'meetConfig'
+                         && request.resource.data.teacherId == userId
+                         && request.resource.data.permanentMeetUrl is string
+                         && request.resource.data.permanentMeetUrl.size() > 24
+                         && request.resource.data.permanentMeetUrl.matches('https://meet\\.google\\.com/.*')
+                         && request.resource.data.permanentMeetSpaceName is string
+                       )
+                       ||
+                       (
+                         docId == 'bankDetails'
+                         && request.resource.data.teacherId == userId
+                         && request.resource.data.alias is string
+                         && request.resource.data.alias.size() >= 3
+                         && request.resource.data.cbuCvu is string
+                         && request.resource.data.cbuCvu.size() == 22
+                         && request.resource.data.cbuCvu.matches('^[0-9]{22}$')
+                         && request.resource.data.accountHolder is string
+                         && request.resource.data.accountHolder.size() >= 3
+                       )
+                     );
       }
     }
 
@@ -139,22 +155,12 @@ service cloud.firestore {
       );
       
       // Permitir crear clases:
-      // 1. Profesor activo crea una clase asignándose como teacherId
-      // 2. Alumno activo reserva una clase asignándose como studentId, con status 'scheduled' y hacia un profesor existente y activo
+      // Exclusivamente el profesor activo asignándose como teacherId para clases manuales (Subbloque 6B.3.3.3).
+      // Las clases de abonos mensuales se crean de forma atómica y segura desde el backend con Firebase Admin SDK.
       allow create: if isActiveUser() && (
-        (
-          request.resource.data.teacherId == request.auth.uid &&
-          currentUserData().get('role', '') == 'teacher' &&
-          request.resource.data.status in ['scheduled', 'in_progress', 'completed', 'cancelled']
-        )
-        ||
-        (
-          currentUserData().get('role', '') == 'student' &&
-          request.resource.data.studentId == request.auth.uid &&
-          request.resource.data.status == 'scheduled' &&
-          exists(/databases/$(database)/documents/users/$(request.resource.data.teacherId)) &&
-          get(/databases/$(database)/documents/users/$(request.resource.data.teacherId)).data.get('role', '') == 'teacher'
-        )
+        request.resource.data.teacherId == request.auth.uid &&
+        currentUserData().get('role', '') == 'teacher' &&
+        request.resource.data.status in ['scheduled', 'in_progress', 'completed', 'cancelled']
       );
                     
       // Solo el profesor creador activo puede actualizar o eliminar la clase
@@ -215,6 +221,39 @@ service cloud.firestore {
 
       // Solo el profesor dueño activo puede eliminar sus excepciones (restablecer disponibilidad)
       allow delete: if isActiveUser() && resource.data.teacherId == request.auth.uid;
+    }
+
+    // Reglas para la colección de abonos mensuales (monthlyBookings) - Subbloque 6B.3.3.3
+    match /monthlyBookings/{bookingId} {
+      // Lectura segura: Un alumno activo solo puede consultar sus propios abonos (studentId == request.auth.uid)
+      // y un profesor activo solo puede consultar los abonos donde es el docente asignado (teacherId == request.auth.uid).
+      allow read: if isActiveUser() && (
+        resource.data.studentId == request.auth.uid || 
+        resource.data.teacherId == request.auth.uid
+      );
+
+      // Toda creación, modificación o cancelación de abonos mensuales se realiza
+      // de forma atómica y segura exclusivamente en el backend mediante Cloud Functions v2 con Firebase Admin SDK.
+      allow write: if false;
+    }
+
+    // Reglas para la colección de cerrojos de disponibilidad (teacherSlotLocks) - Subbloque 6B.3.3.3
+    match /teacherSlotLocks/{lockKey} {
+      // Lectura restringida: Solo el profesor titular o el alumno asignado al cerrojo pueden consultarlo.
+      // Se prohíbe la lectura pública indiscriminada para evitar la filtración de studentId y bookingId a otros alumnos.
+      allow read: if isActiveUser() && (
+        resource.data.teacherId == request.auth.uid ||
+        resource.data.studentId == request.auth.uid
+      );
+
+      // Escritura estrictamente prohibida desde el cliente web (exclusiva de Cloud Functions con Admin SDK).
+      allow write: if false;
+    }
+
+    // Reglas para el documento de control diario de concurrencia (teacherDailySchedule) - Subbloque 6B.3.3.3
+    // Documento interno de serialización transaccional utilizado exclusivamente por el backend.
+    match /teacherDailySchedule/{scheduleId} {
+      allow read, write: if false;
     }
   }
 }

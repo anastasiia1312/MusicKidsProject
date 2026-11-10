@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Calendar,
   Clock,
@@ -12,7 +12,6 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { Navbar } from '../../components/common/Navbar';
 import { getStudents, createLesson } from '../../services/lessonService';
-import { getOrCreateTeacherPermanentMeetSpace } from '../../services/permanentMeetService';
 import { combineDateAndTimeToTimestamp } from '../../utils/dateUtils';
 import { LESSON_DURATION_MINUTES } from '../../types/lesson';
 import type { UserProfile } from '../../types/auth';
@@ -34,6 +33,9 @@ export const CreateLesson: React.FC<CreateLessonProps> = ({ onNavigate }) => {
   const [loadingStudents, setLoadingStudents] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Clave de idempotencia estable por intento de creación
+  const submissionKeyRef = useRef<string | null>(null);
 
   // Cargar lista de alumnos disponibles
   useEffect(() => {
@@ -105,51 +107,33 @@ export const CreateLesson: React.FC<CreateLessonProps> = ({ onNavigate }) => {
 
     setIsSubmitting(true);
 
-    try {
-      // 1. Obtener o reutilizar la sala permanente de Google Meet del profesor
-      let meetResult: { meetUrl: string; meetSpaceName: string };
-      try {
-        meetResult = await getOrCreateTeacherPermanentMeetSpace(user.uid);
-      } catch (meetErr: any) {
-        console.error('Error al obtener o crear la sala permanente de Google Meet:', meetErr);
-        if (meetErr?.code === 'auth/popup-closed-by-user') {
-          setErrorMessage(
-            'Se canceló la ventana de autorización de Google. Se requiere autorización para crear clases con Google Meet.'
-          );
-        } else if (
-          meetErr?.message?.includes('PERMISSIONS_DENIED_PRIVATE_SETTINGS') ||
-          meetErr?.message?.includes('privateSettings')
-        ) {
-          setErrorMessage(
-            'Permisos insuficientes en Firestore para acceder a la configuración privada de la sala permanente (users/{teacherId}/privateSettings/meetConfig).'
-          );
-        } else {
-          setErrorMessage(
-            meetErr?.message || 'No se pudo vincular la sala de Google Meet del profesor. Verificá tu autorización e intentá nuevamente.'
-          );
-        }
-        setIsSubmitting(false);
-        return;
-      }
+    // Generar clave de idempotencia estable si aún no fue creada para este envío
+    if (!submissionKeyRef.current) {
+      submissionKeyRef.current = `man_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    }
 
-      // 2. Crear el documento en Firestore con meetUrl y meetSpaceName
+    try {
       const timestamp = combineDateAndTimeToTimestamp(date, time);
 
       await createLesson({
         title: title.trim(),
-        teacherId: user.uid,
         studentId,
         date: timestamp,
         duration: Number(duration),
-        meetUrl: meetResult.meetUrl,
-        meetSpaceName: meetResult.meetSpaceName,
+        dateStr: date,
+        startTime: time,
+        idempotencyKey: submissionKeyRef.current,
       });
+
+      // Éxito: limpiar clave de envío
+      submissionKeyRef.current = null;
 
       // Redirigir al dashboard del profesor tras la creación exitosa
       onNavigate('/teacher/dashboard');
     } catch (err: any) {
       console.error('Error al guardar la clase en la base de datos:', err);
-      setErrorMessage('Ocurrió un error al registrar la clase. Intentá nuevamente.');
+      // Mantener submissionKeyRef intacto para permitir reintentar con la misma clave ante errores de red
+      setErrorMessage(err?.message || 'Ocurrió un error al registrar la clase. Intentá nuevamente.');
     } finally {
       setIsSubmitting(false);
     }
@@ -218,6 +202,7 @@ export const CreateLesson: React.FC<CreateLessonProps> = ({ onNavigate }) => {
                   value={title}
                   onChange={(e) => {
                     setTitle(e.target.value);
+                    submissionKeyRef.current = null;
                     if (errorMessage) setErrorMessage(null);
                   }}
                   placeholder="Ej. Clase de piano, Teoría y solfeo, Guitarra inicial..."
@@ -252,6 +237,7 @@ export const CreateLesson: React.FC<CreateLessonProps> = ({ onNavigate }) => {
                     value={studentId}
                     onChange={(e) => {
                       setStudentId(e.target.value);
+                      submissionKeyRef.current = null;
                       if (errorMessage) setErrorMessage(null);
                     }}
                     disabled={isSubmitting}
@@ -284,6 +270,7 @@ export const CreateLesson: React.FC<CreateLessonProps> = ({ onNavigate }) => {
                     value={date}
                     onChange={(e) => {
                       setDate(e.target.value);
+                      submissionKeyRef.current = null;
                       if (errorMessage) setErrorMessage(null);
                     }}
                     disabled={isSubmitting}
@@ -307,6 +294,7 @@ export const CreateLesson: React.FC<CreateLessonProps> = ({ onNavigate }) => {
                     value={time}
                     onChange={(e) => {
                       setTime(e.target.value);
+                      submissionKeyRef.current = null;
                       if (errorMessage) setErrorMessage(null);
                     }}
                     disabled={isSubmitting}
@@ -336,7 +324,7 @@ export const CreateLesson: React.FC<CreateLessonProps> = ({ onNavigate }) => {
                 {isSubmitting ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Creando clase y videollamada...</span>
+                    <span>Creando clase...</span>
                   </>
                 ) : (
                   <>

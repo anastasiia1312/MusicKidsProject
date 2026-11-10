@@ -23,7 +23,8 @@ import {
   runTransaction,
   type Firestore,
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, functions, auth } from './firebase';
 import {
   calculateMonthlyOccurrences,
   getBuenosAiresNow,
@@ -630,9 +631,11 @@ export async function executeFirestoreAtomicMonthlyBooking(
  */
 export async function createTemporaryMonthlyBooking(
   payload: CreateTemporaryMonthlyBookingPayload,
-  authenticatedStudentId: string
+  authenticatedStudentId: string,
+  options?: { skipClientAuthCheck?: boolean }
 ): Promise<TemporaryMonthlyBookingResult> {
-  if (!authenticatedStudentId) {
+  const currentUser = auth.currentUser;
+  if (!options?.skipClientAuthCheck && (!currentUser || !authenticatedStudentId)) {
     return {
       success: false,
       message: 'Debés iniciar sesión como alumno para realizar una reserva.',
@@ -640,210 +643,218 @@ export async function createTemporaryMonthlyBooking(
     };
   }
 
-  const { teacherId, month, recurringSlotIds } = payload;
-  if (!teacherId || !month || !Array.isArray(recurringSlotIds) || recurringSlotIds.length === 0) {
+  const { teacherId, month, recurringSlotIds, weeklyFrequency, idempotencyKey } = payload;
+  const safeMonth = (month || (payload as any).monthKey || '').trim();
+
+  if (!teacherId || !teacherId.trim()) {
     return {
       success: false,
-      message: 'Parámetros incompletos para realizar la reserva temporal.',
+      message: 'Falta identificar al profesor para realizar la reserva.',
       errorCode: 'INVALID_PARAMETERS',
     };
   }
 
-  try {
-    // 1. Cargar perfiles y datos del servidor
-    const [
-      studentProfile,
-      teacherProfile,
-      recurringSlots,
-      exceptions,
-      bookedAvailabilities,
-      existingLessons,
-    ] = await Promise.all([
-      fetchUserProfile(authenticatedStudentId),
-      fetchUserProfile(teacherId),
-      getTeacherRecurringSlots(teacherId, true),
-      getTeacherScheduleExceptions(teacherId),
-      getTeacherAvailability(teacherId),
-      getTeacherLessons(teacherId),
-    ]);
-
-    if (!studentProfile || studentProfile.role !== 'student' || studentProfile.status === 'disabled') {
-      return {
-        success: false,
-        message: 'Solo los alumnos registrados y activos pueden realizar reservas.',
-        errorCode: 'UNAUTHORIZED_STUDENT',
-      };
-    }
-
-    if (!teacherProfile || teacherProfile.role !== 'teacher' || teacherProfile.status === 'disabled') {
-      return {
-        success: false,
-        message: 'El profesor seleccionado no está disponible o su cuenta está inactiva.',
-        errorCode: 'TEACHER_NOT_FOUND',
-      };
-    }
-
-    // 2. Consultar locks existentes en Firestore
-    let existingLocks: TeacherSlotLock[] = [];
-    try {
-      const locksQuery = query(
-        collection(db, 'teacherSlotLocks'),
-        where('teacherId', '==', teacherId)
-      );
-      const locksSnap = await getDocs(locksQuery);
-      existingLocks = locksSnap.docs.map((d) => ({
-        id: d.id,
-        ...(d.data() as Omit<TeacherSlotLock, 'id'>),
-      }));
-    } catch (lockQueryErr) {
-      console.warn('Advertencia al consultar teacherSlotLocks:', lockQueryErr);
-    }
-
-    // 3. Ejecutar validación completa en el servidor
-    const validation = validateMonthlyBookingOnServer(
-      { teacherId, month, recurringSlotIds },
-      {
-        studentProfile,
-        teacherProfile,
-        recurringSlots,
-        exceptions,
-        bookedAvailabilities,
-        existingLessons,
-        existingLocks,
-      },
-      { requireRateValidation: true }
-    );
-
-    if (validation.isValid === false) {
-      return {
-        success: false,
-        message: validation.failure.message,
-        errorCode: validation.failure.code,
-      };
-    }
-
-    const { occurrences, fixedRate, expiresAt } = validation;
-    const nowServer = new Date();
-    const [yearStr, monthNumStr] = month.split('-');
-
-    // 4. Ejecutar transacción atómica en Firestore
-    const bookingRef = doc(collection(db, 'monthlyBookings'));
-    const bookingId = bookingRef.id;
-
-    const bookingData: MonthlyBooking = {
-      id: bookingId,
-      teacherId,
-      studentId: authenticatedStudentId,
-      month,
-      year: parseInt(yearStr, 10),
-      monthNumber: parseInt(monthNumStr, 10),
-      recurringSlotIds,
-      weeklyFrequency: recurringSlotIds.length as 1 | 2 | 3,
-      totalLessons: occurrences.length,
-      occurrences: occurrences.map((o) => ({
-        date: o.date,
-        startTime: o.startTime,
-        endTime: o.endTime,
-        duration: o.duration,
-        formattedDate: o.formattedDate,
-      })),
-      status: 'pending_payment',
-      totalPrice: fixedRate?.price,
-      price: fixedRate?.price,
-      currency: 'ARS',
-      idempotencyKey: payload.idempotencyKey || undefined,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-      expiresAt: expiresAt,
-    };
-
-    try {
-      await runTransaction(db, async (transaction) => {
-        // a. Comprobar concurrencia: ningún lock debe estar activo
-        for (const occ of occurrences) {
-          const lockKey = generateSlotLockKey(teacherId, occ.date, occ.startTime);
-          const lockDocRef = doc(db, 'teacherSlotLocks', lockKey);
-          const lockSnap = await transaction.get(lockDocRef);
-
-          if (lockSnap.exists()) {
-            const data = lockSnap.data() as TeacherSlotLock;
-            if (data.expiresAt) {
-              const expTime = data.expiresAt?.toDate
-                ? data.expiresAt.toDate().getTime()
-                : new Date(data.expiresAt).getTime();
-              if (nowServer.getTime() < expTime) {
-                throw new Error(`SLOT_LOCKED:${occ.formattedDate} a las ${occ.startTime}`);
-              }
-            } else {
-              throw new Error(`SLOT_LOCKED:${occ.formattedDate} a las ${occ.startTime}`);
-            }
-          }
-        }
-
-        // b. Escribir reserva en monthlyBookings
-        transaction.set(bookingRef, bookingData);
-
-        // c. Escribir cerrojos deterministas en teacherSlotLocks con expiresAt a 24 horas
-        for (const occ of occurrences) {
-          const lockKey = generateSlotLockKey(teacherId, occ.date, occ.startTime);
-          const lockDocRef = doc(db, 'teacherSlotLocks', lockKey);
-          const lockData: TeacherSlotLock = {
-            id: lockKey,
-            teacherId,
-            date: occ.date,
-            startTime: occ.startTime,
-            endTime: occ.endTime,
-            duration: occ.duration,
-            bookingType: 'monthly',
-            bookingId,
-            studentId: authenticatedStudentId,
-            createdAt: serverTimestamp(),
-            expiresAt: expiresAt,
-          };
-          transaction.set(lockDocRef, lockData);
-        }
-      });
-
-      return {
-        success: true,
-        bookingId,
-        booking: { ...bookingData, id: bookingId },
-        expiresAt,
-        expiresAtFormatted: formatExpirationBuenosAires(expiresAt),
-        totalPrice: fixedRate?.price,
-        currency: 'ARS',
-        totalLessons: occurrences.length,
-        message: 'Tu reserva temporal se creó correctamente. Tenés 24 horas para realizar la transferencia.',
-      };
-    } catch (txErr: any) {
-      const msg = txErr?.message || String(txErr);
-      if (msg.includes('SLOT_LOCKED')) {
-        const slotDetail = msg.split(':')[1] || '';
-        return {
-          success: false,
-          errorCode: 'SLOT_LOCKED',
-          message: `El horario de ${slotDetail} acaba de ser reservado por otro alumno. Por favor elegí otro horario.`,
-        };
-      }
-      if (msg.includes('permission-denied') || msg.includes('insufficient permissions')) {
-        return {
-          success: false,
-          errorCode: 'FIRESTORE_RULES_PENDING',
-          message:
-            'Las reglas de Firestore para reservas temporales están pendientes de despliegue en Firebase Console. Verificá la propuesta de reglas en el reporte.',
-        };
-      }
-      throw txErr;
-    }
-  } catch (err: any) {
-    console.error('Error al crear reserva temporal mensual:', err);
+  if (!safeMonth) {
     return {
       success: false,
-      errorCode: 'TRANSACTION_ERROR',
-      message:
-        err?.message ||
-        'Ocurrió un error al procesar tu reserva temporal. Por favor intentá nuevamente.',
+      message: 'No se seleccionó un mes válido para realizar la reserva temporal.',
+      errorCode: 'INVALID_PARAMETERS',
     };
+  }
+
+  if (!Array.isArray(recurringSlotIds) || recurringSlotIds.length === 0) {
+    return {
+      success: false,
+      message: 'Debe seleccionar al menos un horario semanal para el abono.',
+      errorCode: 'INVALID_PARAMETERS',
+    };
+  }
+
+  const stableIdempotencyKey =
+    idempotencyKey || `mb_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+  const freq = (weeklyFrequency || recurringSlotIds.length) as 1 | 2 | 3;
+
+  try {
+    const createBookingFn = httpsCallable<
+      {
+        teacherId: string;
+        month: string;
+        recurringSlotIds: string[];
+        weeklyFrequency: 1 | 2 | 3;
+        idempotencyKey?: string;
+      },
+      {
+        success: boolean;
+        bookingId: string;
+        status: string;
+        totalPrice: number;
+        currency: 'ARS';
+        totalLessons: number;
+        occurrences: any[];
+        lessonIds: string[];
+        expiresAt: string;
+        bankDetails?: {
+          alias: string;
+          cbuCvu: string;
+          accountHolder: string;
+          bankName?: string;
+        } | null;
+        message: string;
+      }
+    >(functions, 'createMonthlyBooking');
+
+    const response = await createBookingFn({
+      teacherId: teacherId.trim(),
+      month: safeMonth,
+      recurringSlotIds,
+      weeklyFrequency: freq,
+      idempotencyKey: stableIdempotencyKey,
+    });
+
+    const data = response.data;
+    const expiresAtDate = new Date(data.expiresAt);
+
+    return {
+      success: true,
+      bookingId: data.bookingId,
+      expiresAt: expiresAtDate,
+      expiresAtFormatted: formatExpirationBuenosAires(expiresAtDate),
+      totalPrice: data.totalPrice,
+      currency: 'ARS',
+      totalLessons: data.totalLessons,
+      bankDetails: data.bankDetails || null,
+      message:
+        data.message ||
+        'Tu reserva temporal se creó correctamente. Tenés 24 horas para realizar la transferencia.',
+    };
+  } catch (err: any) {
+    console.error('Error al invocar createMonthlyBooking:', err);
+    const code = (err?.code || '').replace('functions/', '').toLowerCase();
+    const rawMsg = (err?.message || '').toString();
+
+    let friendlyMessage = 'Ocurrió un error al procesar tu reserva temporal. Por favor intentá nuevamente.';
+    let errorCode = 'TRANSACTION_ERROR';
+
+    if (code === 'already-exists') {
+      errorCode = 'SLOT_LOCKED';
+      friendlyMessage =
+        'Uno o más de los horarios seleccionados ya se encuentran ocupados o reservados por otro alumno. Por favor elegí otro horario.';
+    } else if (code === 'unauthenticated') {
+      errorCode = 'UNAUTHENTICATED';
+      friendlyMessage = 'Debés iniciar sesión en MusicKids para realizar una reserva.';
+    } else if (code === 'permission-denied') {
+      errorCode = 'PERMISSION_DENIED';
+      friendlyMessage = 'Solo alumnos registrados pueden realizar reservas mensuales.';
+    } else if (code === 'failed-precondition') {
+      errorCode = 'FAILED_PRECONDITION';
+      if (rawMsg.includes('tarifa')) {
+        friendlyMessage = 'El profesor aún no tiene configurada la tarifa fija para esta frecuencia semanal.';
+      } else if (rawMsg.includes('bloqueada') || rawMsg.includes('bloqueado')) {
+        friendlyMessage = 'Una de las fechas u horarios seleccionados se encuentra bloqueada en el calendario del profesor.';
+      } else if (rawMsg.includes('transcurrido') || rawMsg.includes('comenzado')) {
+        friendlyMessage = 'No se pueden reservar clases en fechas u horarios que ya han comenzado o transcurrido.';
+      } else {
+        friendlyMessage = rawMsg && !rawMsg.includes('INTERNAL') ? rawMsg : 'No se cumplen las condiciones para realizar la reserva.';
+      }
+    } else if (code === 'unavailable') {
+      errorCode = 'UNAVAILABLE';
+      friendlyMessage = 'No se pudo conectar con el servidor de MusicKids. Verificá tu conexión a internet e intentá nuevamente.';
+    } else if (rawMsg && !rawMsg.includes('INTERNAL') && !rawMsg.includes('FirebaseError')) {
+      friendlyMessage = rawMsg;
+    }
+
+    return {
+      success: false,
+      errorCode,
+      message: friendlyMessage,
+    };
+  }
+}
+
+/**
+ * Consulta la disponibilidad pública y sanitizada del profesor para un mes específico
+ * Devuelve únicamente franjas ocupadas y fechas bloqueadas (sin datos privados).
+ */
+export async function getTeacherPublicAvailability(
+  teacherId: string,
+  month: string
+): Promise<{
+  occupiedIntervals: Array<{ date: string; startTime: string; endTime: string }>;
+  blockedDates: string[];
+}> {
+  try {
+    const getAvailabilityFn = httpsCallable<
+      { teacherId: string; month: string },
+      {
+        teacherId: string;
+        month: string;
+        occupiedIntervals: Array<{ date: string; startTime: string; endTime: string }>;
+        blockedDates: string[];
+      }
+    >(functions, 'getTeacherPublicAvailability');
+
+    const result = await getAvailabilityFn({ teacherId, month });
+    return {
+      occupiedIntervals: result.data.occupiedIntervals || [],
+      blockedDates: result.data.blockedDates || [],
+    };
+  } catch (err) {
+    console.warn('Error al consultar disponibilidad pública sanitizada:', err);
+    return { occupiedIntervals: [], blockedDates: [] };
+  }
+}
+
+/**
+ * Permite al profesor confirmar la recepción del pago de un abono mensual
+ */
+export async function confirmMonthlyBookingPayment(
+  bookingId: string
+): Promise<{ success: boolean; message: string }> {
+  const confirmPaymentFn = httpsCallable<
+    { bookingId: string },
+    { success: boolean; bookingId: string; message: string }
+  >(functions, 'confirmMonthlyBookingPayment');
+
+  const result = await confirmPaymentFn({ bookingId });
+  return result.data;
+}
+
+/**
+ * Consulta los abonos mensuales del profesor autenticado directamente desde Firestore.
+ * Conforme a las reglas de seguridad: allow read: if resource.data.teacherId == request.auth.uid.
+ */
+export async function getTeacherMonthlyBookings(
+  teacherId: string
+): Promise<MonthlyBooking[]> {
+  if (!teacherId) return [];
+  try {
+    const q = query(
+      collection(db, 'monthlyBookings'),
+      where('teacherId', '==', teacherId)
+    );
+    const snap = await getDocs(q);
+    const bookings: MonthlyBooking[] = snap.docs.map((d) => ({
+      id: d.id,
+      ...(d.data() as any),
+    }));
+
+    return bookings.sort((a, b) => {
+      const aTime = a.createdAt?.toDate
+        ? a.createdAt.toDate().getTime()
+        : a.createdAt
+        ? new Date(a.createdAt).getTime()
+        : 0;
+      const bTime = b.createdAt?.toDate
+        ? b.createdAt.toDate().getTime()
+        : b.createdAt
+        ? new Date(b.createdAt).getTime()
+        : 0;
+      return bTime - aTime;
+    });
+  } catch (err) {
+    console.error('Error al consultar abonos mensuales del profesor:', err);
+    throw err;
   }
 }
 

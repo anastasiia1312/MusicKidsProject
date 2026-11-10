@@ -31,6 +31,7 @@ export interface MonthlyOccurrencePreview {
 export interface MonthOption {
   year: number;
   month: number; // 1-12
+  monthKey: string; // Formato YYYY-MM (ej: "2026-12")
   label: string; // "Diciembre 2026"
   isCurrentMonth: boolean;
 }
@@ -55,6 +56,7 @@ export interface MonthlyPreviewResult {
 export type MonthlyBookingStatus =
   | 'confirmed'
   | 'pending_payment'
+  | 'pending_payment_confirmation'
   | 'cancelled'
   | 'refunded'
   | 'expired';
@@ -74,6 +76,8 @@ export interface MonthlyBooking {
   id?: string;
   teacherId: string;
   studentId: string;
+  studentName?: string;
+  studentEmail?: string;
   month: string; // Formato YYYY-MM (ej: "2026-12")
   year?: number;
   monthNumber?: number;
@@ -90,6 +94,8 @@ export interface MonthlyBooking {
   createdAt: any;
   updatedAt: any;
   expiresAt?: any; // Fecha exacta de expiración (24 horas después de createdAt)
+  confirmedAt?: any;
+  expiredAt?: any;
 }
 
 /**
@@ -138,6 +144,12 @@ export interface TemporaryMonthlyBookingResult {
   totalLessons?: number;
   message: string;
   errorCode?: string;
+  bankDetails?: {
+    alias: string;
+    cbuCvu: string;
+    accountHolder: string;
+    bankName?: string;
+  } | null;
 }
 
 /**

@@ -94,10 +94,12 @@ export function getAvailableMonthOptions(monthsAhead = 6): MonthOption[] {
       year += 1;
     }
 
+    const monthKey = `${year}-${String(month).padStart(2, '0')}`;
     const label = `${MONTH_NAMES_SPANISH[month - 1]} ${year}`;
     options.push({
       year,
       month,
+      monthKey,
       label,
       isCurrentMonth: i === 0,
     });
