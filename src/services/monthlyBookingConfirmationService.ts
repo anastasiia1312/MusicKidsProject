@@ -821,13 +821,133 @@ export async function confirmMonthlyBookingPayment(
 }
 
 /**
- * Consulta los abonos mensuales del profesor autenticado directamente desde Firestore.
- * Conforme a las reglas de seguridad: allow read: if resource.data.teacherId == request.auth.uid.
+ * Reconstruye abonos mensuales a partir de las clases del profesor.
+ * Permite mantener la visibilidad en entornos donde las reglas de 'monthlyBookings'
+ * aún no han sido desplegadas en Firebase.
+ */
+export function reconstructMonthlyBookingsFromLessons(
+  teacherId: string,
+  lessons: Lesson[]
+): MonthlyBooking[] {
+  if (!Array.isArray(lessons) || lessons.length === 0) return [];
+
+  const bookingMap = new Map<string, Lesson[]>();
+  for (const lesson of lessons) {
+    const bookingId = (lesson as any).monthlyBookingId;
+    if (bookingId && typeof bookingId === 'string') {
+      if (!bookingMap.has(bookingId)) {
+        bookingMap.set(bookingId, []);
+      }
+      bookingMap.get(bookingId)!.push(lesson);
+    }
+  }
+
+  const result: MonthlyBooking[] = [];
+  for (const [bookingId, groupLessons] of bookingMap.entries()) {
+    const first = groupLessons[0];
+    const isPending = groupLessons.some(
+      (l) => (l as any).paymentStatus === 'pending_confirmation'
+    );
+
+    // Derivar mes del primer horario
+    let monthStr = '';
+    if (typeof (first as any).date === 'string') {
+      monthStr = (first as any).date.substring(0, 7);
+    } else if (first.date) {
+      const d = (first.date as any)?.toDate
+        ? (first.date as any).toDate()
+        : new Date(first.date as any);
+      if (!isNaN(d.getTime())) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        monthStr = `${y}-${m}`;
+      }
+    }
+
+    // Mapear ocurrencias
+    const occurrences = groupLessons.map((l) => {
+      let dateStr = '';
+      let startTime = (l as any).startTime || '';
+      if (typeof (l as any).date === 'string') {
+        dateStr = (l as any).date.substring(0, 10);
+      } else if (l.date) {
+        const d = (l.date as any)?.toDate
+          ? (l.date as any).toDate()
+          : new Date(l.date as any);
+        if (!isNaN(d.getTime())) {
+          dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+            d.getDate()
+          ).padStart(2, '0')}`;
+          if (!startTime) {
+            startTime = `${String(d.getHours()).padStart(2, '0')}:${String(
+              d.getMinutes()
+            ).padStart(2, '0')}`;
+          }
+        }
+      }
+      return {
+        date: dateStr,
+        startTime: startTime || '14:00',
+        endTime: '',
+        duration: l.duration || 45,
+      };
+    });
+
+    const weeklyFreq = Math.min(
+      3,
+      Math.max(1, Math.round(groupLessons.length / 4))
+    ) as 1 | 2 | 3;
+
+    result.push({
+      id: bookingId,
+      teacherId,
+      studentId: first.studentId || '',
+      studentName: (first as any).studentName || 'Alumno',
+      studentEmail: (first as any).studentEmail || '',
+      month: monthStr,
+      recurringSlotIds: (first as any).recurringSlotIds || [],
+      weeklyFrequency: weeklyFreq,
+      totalLessons: groupLessons.length,
+      lessonIds: groupLessons.map((l) => l.id),
+      occurrences,
+      status: isPending ? 'pending_payment_confirmation' : 'confirmed',
+      totalPrice: (first as any).totalPrice || (first as any).price || 0,
+      price: (first as any).price || 0,
+      currency: 'ARS',
+      createdAt: (first as any).createdAt || first.date || new Date(),
+      updatedAt: (first as any).updatedAt || new Date(),
+      expiresAt: (first as any).expiresAt || null,
+    });
+  }
+
+  return result.sort((a, b) => {
+    const aTime = a.createdAt?.toDate
+      ? a.createdAt.toDate().getTime()
+      : a.createdAt
+      ? new Date(a.createdAt).getTime()
+      : 0;
+    const bTime = b.createdAt?.toDate
+      ? b.createdAt.toDate().getTime()
+      : b.createdAt
+      ? new Date(b.createdAt).getTime()
+      : 0;
+    return bTime - aTime;
+  });
+}
+
+/**
+ * Consulta los abonos mensuales del profesor autenticado.
+ * 1. Intenta consulta directa a Firestore 'monthlyBookings' con filtro teacherId.
+ * 2. Si las reglas aún no fueron desplegadas o devuelven Missing/insufficient permissions,
+ *    recupera los abonos de forma segura a través de las clases en 'lessons' del profesor.
  */
 export async function getTeacherMonthlyBookings(
-  teacherId: string
+  teacherId: string,
+  preloadedLessons?: Lesson[]
 ): Promise<MonthlyBooking[]> {
   if (!teacherId) return [];
+
+  // 1. Intentar consulta directa a Firestore 'monthlyBookings'
   try {
     const q = query(
       collection(db, 'monthlyBookings'),
@@ -852,9 +972,32 @@ export async function getTeacherMonthlyBookings(
         : 0;
       return bTime - aTime;
     });
-  } catch (err) {
-    console.error('Error al consultar abonos mensuales del profesor:', err);
-    throw err;
+  } catch (err: any) {
+    const errStr = String(err?.message || err);
+    if (
+      errStr.includes('permission-denied') ||
+      errStr.includes('insufficient permissions') ||
+      errStr.includes('Missing or insufficient')
+    ) {
+      console.warn(
+        'Reglas de lectura directa en monthlyBookings aún no disponibles en Firestore; recuperando abonos desde las clases del profesor.'
+      );
+    } else {
+      console.warn('Advertencia al consultar monthlyBookings:', err);
+    }
+
+    // 2. Recuperación/fallback seguro mediante clases de 'lessons'
+    if (preloadedLessons && preloadedLessons.length > 0) {
+      return reconstructMonthlyBookingsFromLessons(teacherId, preloadedLessons);
+    }
+
+    try {
+      const lessons = await getTeacherLessons(teacherId);
+      return reconstructMonthlyBookingsFromLessons(teacherId, lessons);
+    } catch {
+      return [];
+    }
   }
 }
+
 

@@ -177,7 +177,15 @@ export const confirmMonthlyBookingPayment = onCall(
       throw new HttpsError('invalid-argument', 'Los datos de la confirmación son requeridos.');
     }
 
-    return await confirmMonthlyBookingPaymentTransaction(db, authenticatedTeacherId, data);
+    try {
+      return await confirmMonthlyBookingPaymentTransaction(db, authenticatedTeacherId, data);
+    } catch (err: any) {
+      if (err instanceof HttpsError) {
+        throw err;
+      }
+      console.error('Error al procesar confirmMonthlyBookingPayment:', err);
+      throw new HttpsError('internal', err?.message || 'Error interno al confirmar el abono.');
+    }
   }
 );
 

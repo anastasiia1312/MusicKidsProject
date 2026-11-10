@@ -717,13 +717,66 @@ export async function confirmMonthlyBookingPaymentTransaction(
     console.warn('Advertencia al consultar meetConfig para confirmación:', err);
   }
 
+  // Consultar lecciones vinculadas por bookingId para asegurar consistencia
+  let linkedLessonsSnap: admin.firestore.QuerySnapshot | null = null;
+  try {
+    linkedLessonsSnap = await db
+      .collection('lessons')
+      .where('monthlyBookingId', '==', bookingId.trim())
+      .get();
+  } catch (err) {
+    console.warn('Aviso al consultar lecciones vinculadas:', err);
+  }
+
   return await db.runTransaction(async (transaction) => {
+    // ==========================================
+    // 1. TODAS LAS LECTURAS (READS) PRIMERO
+    // ==========================================
     const bookingSnap = await transaction.get(bookingRef);
-    if (!bookingSnap.exists) {
+    let bookingData: any = null;
+
+    if (bookingSnap.exists) {
+      bookingData = bookingSnap.data()!;
+    } else if (linkedLessonsSnap && !linkedLessonsSnap.empty) {
+      // Reconstruir bookingData desde lecciones si el documento en monthlyBookings aún no existía
+      const firstLesson = linkedLessonsSnap.docs[0].data();
+      if (firstLesson.teacherId !== authenticatedTeacherId) {
+        throw new HttpsError(
+          'permission-denied',
+          'No tiene autorización para confirmar pagos de este abono.'
+        );
+      }
+      bookingData = {
+        id: bookingId,
+        teacherId: authenticatedTeacherId,
+        studentId: firstLesson.studentId || '',
+        studentName: firstLesson.studentName || 'Alumno',
+        studentEmail: firstLesson.studentEmail || '',
+        status: firstLesson.paymentStatus === 'confirmed' ? 'confirmed' : 'pending_payment_confirmation',
+        lessonIds: linkedLessonsSnap.docs.map((d) => d.id),
+        occurrences: linkedLessonsSnap.docs.map((d) => {
+          const lData = d.data();
+          let dStr = '';
+          if (typeof lData.date === 'string') dStr = lData.date.substring(0, 10);
+          else if (lData.date?.toDate) {
+            const dt = lData.date.toDate();
+            dStr = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(
+              dt.getDate()
+            ).padStart(2, '0')}`;
+          }
+          return {
+            date: dStr,
+            startTime: lData.startTime || '14:00',
+            duration: lData.duration || 45,
+          };
+        }),
+        expiresAt: firstLesson.expiresAt || null,
+        totalLessons: linkedLessonsSnap.size,
+      };
+    } else {
       throw new HttpsError('not-found', 'El abono mensual indicado no existe.');
     }
 
-    const bookingData = bookingSnap.data()!;
     if (bookingData.teacherId !== authenticatedTeacherId) {
       throw new HttpsError(
         'permission-denied',
@@ -773,10 +826,30 @@ export async function confirmMonthlyBookingPaymentTransaction(
       }
     }
 
-    // Actualizar estado del abono a 'confirmed'
+    const occurrences = Array.isArray(bookingData.occurrences) ? bookingData.occurrences : [];
+    const uniqueDates = Array.from(new Set(occurrences.map((o: any) => o.date).filter(Boolean))) as string[];
+
+    // Lectura de TODOS los documentos diarios ANTES de iniciar cualquier escritura
+    const schedDocs: Record<
+      string,
+      { ref: admin.firestore.DocumentReference; intervals: DailyIntervalSlot[] }
+    > = {};
+    for (const dStr of uniqueDates) {
+      const schedRef = db.doc(`teacherDailySchedule/${authenticatedTeacherId}_${dStr}`);
+      const schedSnap = await transaction.get(schedRef);
+      schedDocs[dStr] = {
+        ref: schedRef,
+        intervals: schedSnap.exists ? (schedSnap.data()?.intervals || []) : [],
+      };
+    }
+
+    // ==========================================
+    // 2. TODAS LAS ESCRITURAS (WRITES) DESPUÉS
+    // ==========================================
     transaction.set(
       bookingRef,
       {
+        ...bookingData,
         status: 'confirmed',
         confirmedAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -784,8 +857,13 @@ export async function confirmMonthlyBookingPaymentTransaction(
       { merge: true }
     );
 
-    // Actualizar clases asociadas en 'lessons'
-    const lessonIds: string[] = Array.isArray(bookingData.lessonIds) ? bookingData.lessonIds : [];
+    const lessonIds: string[] = Array.from(
+      new Set([
+        ...(Array.isArray(bookingData.lessonIds) ? bookingData.lessonIds : []),
+        ...(linkedLessonsSnap ? linkedLessonsSnap.docs.map((d) => d.id) : []),
+      ])
+    );
+
     for (const lid of lessonIds) {
       const lRef = db.doc(`lessons/${lid}`);
       transaction.set(
@@ -801,48 +879,41 @@ export async function confirmMonthlyBookingPaymentTransaction(
       );
     }
 
-    // Actualizar intervalos en teacherDailySchedule
-    const occurrences = Array.isArray(bookingData.occurrences) ? bookingData.occurrences : [];
-    const uniqueDates = Array.from(new Set(occurrences.map((o: any) => o.date))) as string[];
-
     for (const dStr of uniqueDates) {
-      const schedRef = db.doc(`teacherDailySchedule/${authenticatedTeacherId}_${dStr}`);
-      const schedSnap = await transaction.get(schedRef);
-      if (schedSnap.exists) {
-        const intervals: DailyIntervalSlot[] = schedSnap.data()?.intervals || [];
-        const updated = intervals.map((slot) => {
-          if (slot.bookingId === bookingId) {
-            return {
-              ...slot,
-              status: 'confirmed' as const,
-              expiresAt: null,
-            };
-          }
-          return slot;
-        });
+      const sched = schedDocs[dStr];
+      const updated = sched.intervals.map((slot) => {
+        if (slot.bookingId === bookingId) {
+          return {
+            ...slot,
+            status: 'confirmed' as const,
+            expiresAt: null,
+          };
+        }
+        return slot;
+      });
+      transaction.set(
+        sched.ref,
+        {
+          intervals: updated,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    }
+
+    for (const occ of occurrences) {
+      if (occ.date && occ.startTime) {
+        const lockKey = generateSlotLockKey(authenticatedTeacherId, occ.date, occ.startTime);
+        const lockRef = db.doc(`teacherSlotLocks/${lockKey}`);
         transaction.set(
-          schedRef,
+          lockRef,
           {
-            intervals: updated,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            expiresAt: null,
+            confirmedAt: admin.firestore.FieldValue.serverTimestamp(),
           },
           { merge: true }
         );
       }
-    }
-
-    // Actualizar cerrojos teacherSlotLocks
-    for (const occ of occurrences) {
-      const lockKey = generateSlotLockKey(authenticatedTeacherId, occ.date, occ.startTime);
-      const lockRef = db.doc(`teacherSlotLocks/${lockKey}`);
-      transaction.set(
-        lockRef,
-        {
-          expiresAt: null,
-          confirmedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
     }
 
     return {

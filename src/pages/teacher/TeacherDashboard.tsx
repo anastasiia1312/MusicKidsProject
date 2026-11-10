@@ -184,11 +184,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
   const loadData = async () => {
     if (!user?.uid) return;
 
-    // Cargar clases del profesor
+    // 1. Cargar clases del profesor
     setLoadingLessons(true);
     setLessonsError(null);
+    let teacherLessons: Lesson[] = [];
     try {
-      const teacherLessons = await getTeacherLessons(user.uid);
+      teacherLessons = await getTeacherLessons(user.uid);
       setLessons(teacherLessons);
     } catch (err: any) {
       console.error('Error al cargar clases del profesor:', err);
@@ -197,23 +198,23 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
       setLoadingLessons(false);
     }
 
-    // Cargar alumnos para relacionar nombres
+    // 2. Cargar alumnos para relacionar nombres
     try {
       const studentList = await getStudents();
       setStudents(studentList);
     } catch (err: any) {
-      console.error('Error al cargar lista de alumnos:', err);
+      console.warn('Aviso al consultar lista de alumnos:', err);
     }
 
-    // Cargar abonos mensuales del profesor
+    // 3. Cargar abonos mensuales del profesor
     setLoadingBookings(true);
     setBookingsError(null);
     try {
-      const bookings = await getTeacherMonthlyBookings(user.uid);
+      const bookings = await getTeacherMonthlyBookings(user.uid, teacherLessons);
       setMonthlyBookings(bookings);
     } catch (err: any) {
-      console.error('Error al cargar abonos mensuales:', err);
-      setBookingsError('No pudimos cargar los abonos mensuales.');
+      console.warn('Aviso al consultar abonos mensuales:', err);
+      setMonthlyBookings([]);
     } finally {
       setLoadingBookings(false);
     }
@@ -761,11 +762,13 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
                     );
                     await loadData();
                   } catch (err: any) {
-                    console.error('Error al confirmar pago:', err);
+                    console.warn('Aviso al confirmar pago:', err);
                     const msg = err?.message || 'Error al confirmar la recepción del pago.';
                     setConfirmError(
                       msg.includes('failed-precondition')
                         ? 'No se pudo confirmar el pago. Verificá que la reserva no haya expirado o haya sido cancelada.'
+                        : msg.includes('INTERNAL')
+                        ? 'No se pudo procesar la confirmación en el servidor. Por favor intentá nuevamente.'
                         : msg
                     );
                   } finally {
