@@ -335,7 +335,41 @@ export async function updateTask(
 }
 
 /**
- * Elimina una tarea y todos sus archivos adjuntos de Firebase Storage de forma atómica
+ * Actualiza exclusivamente la lista de archivos adjuntos de una tarea existente en Firestore.
+ */
+export async function updateTaskAttachments(
+  taskId: string,
+  teacherId: string,
+  attachments: TaskAttachment[]
+): Promise<void> {
+  const currentUser = auth.currentUser;
+  if (!currentUser || currentUser.uid !== teacherId) {
+    throw new Error('Usuario no autorizado para modificar los adjuntos de esta tarea.');
+  }
+
+  const taskRef = doc(db, TASKS_COLLECTION, taskId);
+  try {
+    await updateDoc(taskRef, {
+      attachments: attachments || [],
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${TASKS_COLLECTION}/${taskId}`);
+    throw error;
+  }
+}
+
+/**
+ * Elimina una tarea y sus archivos adjuntos de Firebase Storage.
+ *
+ * Secuencia de seguridad:
+ * 1. Comprueba autorización del profesor titular.
+ * 2. Elimina los archivos de Storage mientras el documento de Firestore todavía existe
+ *    (requerido por las reglas de Storage para validar pertenencia con firestore.get).
+ * 3. Elimina posteriormente el documento de Firestore.
+ *
+ * Nota: Firebase Storage y Cloud Firestore son servicios independientes sin transacciones
+ * cross-service atómicas; los errores se gestionan de forma controlada.
  */
 export async function deleteTask(taskId: string, teacherId: string): Promise<void> {
   const currentUser = auth.currentUser;
@@ -355,11 +389,15 @@ export async function deleteTask(taskId: string, teacherId: string): Promise<voi
     throw new Error('No podés eliminar tareas de otro profesor.');
   }
 
-  // 1. Eliminar todos los adjuntos de Storage para no dejar archivos huérfanos
+  // 1. Eliminar todos los adjuntos de Storage mientras el documento de Firestore todavía existe
   if (Array.isArray(taskData.attachments) && taskData.attachments.length > 0) {
-    await Promise.allSettled(
+    const results = await Promise.allSettled(
       taskData.attachments.map((att) => deleteTaskAttachment(att.path))
     );
+    const failures = results.filter((r) => r.status === 'rejected');
+    if (failures.length > 0) {
+      console.warn(`Aviso: ${failures.length} archivo(s) no pudieron eliminarse de Storage.`);
+    }
   }
 
   // 2. Eliminar el documento de Firestore

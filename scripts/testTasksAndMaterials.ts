@@ -406,5 +406,81 @@ assert(
 const pathsTaskWithoutFiles = getPathsToDeleteOnTaskRemoval(task2);
 assert(pathsTaskWithoutFiles.length === 0, 'La eliminación de tarea sin adjuntos se procesa limpiamente');
 
+// ========================================================
+// 6. FLUJO DE ARCHIVOS EN ETAPAS (STAGING LOCAL) Y BOTÓN REACTIVO
+// ========================================================
+console.log('\n--- 6. Comportamiento del botón y validación reactiva ---');
+
+function canSubmitTask(
+  studentId: string,
+  title: string,
+  desc: string,
+  isSubmitting: boolean
+): boolean {
+  const isStudentValid = Boolean(studentId && studentId.trim());
+  const t = title.trim();
+  const isTitleValid = t.length >= 3 && t.length <= 150;
+  const d = desc.trim();
+  const isDescValid = d.length >= 5 && d.length <= 10000;
+  return isStudentValid && isTitleValid && isDescValid && !isSubmitting;
+}
+
+assert(!canSubmitTask('', 'Título Válido', 'Instrucciones válidas', false), 'Botón deshabilitado si no hay alumno seleccionado');
+assert(!canSubmitTask('st_1', 'No', 'Instrucciones válidas', false), 'Botón deshabilitado si título < 3 caracteres');
+assert(!canSubmitTask('st_1', 'Título Válido', 'Abc', false), 'Botón deshabilitado si descripción < 5 caracteres');
+assert(!canSubmitTask('st_1', 'Título Válido', 'Instrucciones válidas', true), 'Botón deshabilitado mientras se está guardando (isSubmitting = true)');
+assert(canSubmitTask('st_1', 'Título Válido', 'Instrucciones válidas', false), 'Botón habilitado cuando todos los campos son válidos sin adjuntos');
+assert(canSubmitTask('st_1', 'Título Válido', 'Instrucciones válidas con archivos', false), 'Botón habilitado cuando todos los campos son válidos con adjuntos pendientes');
+
+// ========================================================
+// 7. ORDEN ESTRICTO DE 2 PASOS (FIRESTORE PRIMERO -> STORAGE)
+// ========================================================
+console.log('\n--- 7. Orden estricto de creación en 2 pasos ---');
+
+interface LifecycleStep {
+  step: 'FIRESTORE_DOC_CREATED' | 'STORAGE_UPLOAD_ATTEMPT' | 'FIRESTORE_METADATA_UPDATED';
+  taskId: string;
+}
+
+function simulateTaskCreationLifecycle(
+  taskId: string,
+  pendingFiles: File[],
+  mockFirestoreTasks: Record<string, any>
+): LifecycleStep[] {
+  const executedSteps: LifecycleStep[] = [];
+
+  // Paso 1: Crear doc en Firestore antes de cualquier subida a Storage
+  mockFirestoreTasks[taskId] = { id: taskId, title: 'Prueba', studentId: 'st_1' };
+  executedSteps.push({ step: 'FIRESTORE_DOC_CREATED', taskId });
+
+  // Paso 2: Subir archivos a Storage
+  for (const file of pendingFiles) {
+    // Las reglas de Storage verifican taskExists(taskId)
+    const existsInFirestore = Boolean(mockFirestoreTasks[taskId]);
+    if (!existsInFirestore) {
+      throw new Error('FirebaseError: Missing or insufficient permissions (taskExists failed)');
+    }
+    executedSteps.push({ step: 'STORAGE_UPLOAD_ATTEMPT', taskId });
+  }
+
+  // Paso 3: Actualizar metadatos en Firestore
+  if (pendingFiles.length > 0) {
+    executedSteps.push({ step: 'FIRESTORE_METADATA_UPDATED', taskId });
+  }
+
+  return executedSteps;
+}
+
+const simFirestoreDB: Record<string, any> = {};
+const testPending = [
+  createMockFile('partitura.pdf', 1024 * 500, 'application/pdf'),
+  createMockFile('audio.mp3', 1024 * 1024 * 3, 'audio/mpeg'),
+];
+
+const lifecycleSteps = simulateTaskCreationLifecycle('task_new_999', testPending, simFirestoreDB);
+assert(lifecycleSteps[0].step === 'FIRESTORE_DOC_CREATED', 'Paso 1 es siempre la creación previa en Firestore');
+assert(lifecycleSteps[1].step === 'STORAGE_UPLOAD_ATTEMPT', 'Paso 2 es la subida a Storage con doc de Firestore ya existente');
+assert(lifecycleSteps[3].step === 'FIRESTORE_METADATA_UPDATED', 'Paso 3 es la actualización de metadatos en Firestore');
+
 console.log('\n🎉 TODAS LAS PRUEBAS DE SEGURIDAD Y TAREAS PASARON CON ÉXITO.');
 

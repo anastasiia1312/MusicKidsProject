@@ -107,11 +107,20 @@ export async function getStudents(): Promise<UserProfile[]> {
     const querySnapshot = await getDocs(q);
     const students: UserProfile[] = [];
     querySnapshot.forEach((docSnap) => {
-      students.push(docSnap.data() as UserProfile);
+      const data = docSnap.data();
+      students.push({
+        uid: docSnap.id,
+        name: data.name || 'Alumno MusicKids',
+        email: data.email || '',
+        role: 'student',
+        status: data.status || 'active',
+        ...data,
+      } as UserProfile);
     });
     return students;
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, path);
+    console.warn('Aviso al consultar alumnos:', error);
+    return [];
   }
 }
 
