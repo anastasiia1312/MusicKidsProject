@@ -1,0 +1,13 @@
+[
+  {
+    "origin": [
+      "https://music-kids-project.vercel.app"
+    ],
+    "method": ["GET", "HEAD"],
+    "responseHeader": [
+      "Content-Type",
+      "Content-Disposition"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]
