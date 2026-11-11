@@ -20,6 +20,7 @@ import {
   Compass,
   Sparkles,
   Headphones,
+  BookOpen,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { getStudentLessons } from '../../services/lessonService';
@@ -311,44 +312,18 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
               {!isSidebarCollapsed && <span>Buscar profesores</span>}
             </div>
 
-            {/* 3. Tareas (Próximamente) */}
+            {/* 3. Tareas y Materiales */}
             <div
-              id="sidebar-item-tareas"
-              title="Tareas (Próximamente)"
-              aria-label="Tareas (Próximamente)"
+              id="sidebar-item-tareas-materiales"
+              title="Tareas y Materiales"
+              aria-label="Tareas y Materiales"
+              onClick={() => onNavigate('/student/tasks')}
               className={`flex items-center ${
-                isSidebarCollapsed ? 'justify-center p-3' : 'justify-between px-4 py-3'
-              } rounded-2xl text-slate-600 font-semibold text-sm cursor-default hover:bg-slate-50/60 transition-colors`}
+                isSidebarCollapsed ? 'justify-center p-3' : 'gap-3.5 px-4 py-3'
+              } rounded-2xl text-slate-700 hover:bg-[#E8F3F8] hover:text-[#00537A] font-semibold text-sm cursor-pointer transition-colors group`}
             >
-              <div className={`flex items-center ${isSidebarCollapsed ? 'justify-center' : 'gap-3.5'}`}>
-                <FileText className="w-5 h-5 text-slate-400 shrink-0" />
-                {!isSidebarCollapsed && <span>Tareas</span>}
-              </div>
-              {!isSidebarCollapsed && (
-                <span className="bg-[#FFEAA7] text-[#7A5A00] text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                  Próximamente
-                </span>
-              )}
-            </div>
-
-            {/* 4. Materiales (Próximamente) */}
-            <div
-              id="sidebar-item-materiales"
-              title="Materiales (Próximamente)"
-              aria-label="Materiales (Próximamente)"
-              className={`flex items-center ${
-                isSidebarCollapsed ? 'justify-center p-3' : 'justify-between px-4 py-3'
-              } rounded-2xl text-slate-600 font-semibold text-sm cursor-default hover:bg-slate-50/60 transition-colors`}
-            >
-              <div className={`flex items-center ${isSidebarCollapsed ? 'justify-center' : 'gap-3.5'}`}>
-                <Folder className="w-5 h-5 text-slate-400 shrink-0" />
-                {!isSidebarCollapsed && <span>Materiales</span>}
-              </div>
-              {!isSidebarCollapsed && (
-                <span className="bg-[#FFEAA7] text-[#7A5A00] text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                  Próximamente
-                </span>
-              )}
+              <BookOpen className="w-5 h-5 text-slate-500 group-hover:text-[#00537A] shrink-0" />
+              {!isSidebarCollapsed && <span>Tareas y Materiales</span>}
             </div>
 
             {/* 5. Soporte Técnico */}

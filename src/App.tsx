@@ -11,6 +11,8 @@ import { TeacherAvailability } from './pages/teacher/TeacherAvailability';
 import { TeacherStats } from './pages/teacher/TeacherStats';
 import { UserSupportPage } from './pages/support/UserSupportPage';
 import { AdminSupportPage } from './pages/admin/AdminSupportPage';
+import { TeacherTasksPage } from './pages/teacher/TeacherTasksPage';
+import { StudentTasksPage } from './pages/student/StudentTasksPage';
 import { StudentDashboard } from './pages/student/StudentDashboard';
 import { LessonPage } from './pages/LessonPage';
 import { LandingPage } from './pages/LandingPage';
@@ -41,10 +43,12 @@ function AppContent() {
       pathname === '/teacher/availability' ||
       pathname === '/teacher/stats' ||
       pathname === '/teacher/support' ||
+      pathname === '/teacher/tasks' ||
       pathname === '/student/profile' ||
       pathname === '/profile' ||
       pathname === '/student/dashboard' ||
       pathname === '/student/support' ||
+      pathname === '/student/tasks' ||
       pathname === '/admin/dashboard' ||
       pathname === '/admin/support' ||
       pathname.startsWith('/lesson/') ||
@@ -157,7 +161,8 @@ function AppContent() {
     currentPath !== '/teacher/rates' &&
     currentPath !== '/teacher/availability' &&
     currentPath !== '/teacher/stats' &&
-    currentPath !== '/teacher/support'
+    currentPath !== '/teacher/support' &&
+    currentPath !== '/teacher/tasks'
   ) {
     const teacherId = currentPath.replace('/teacher/', '').split('/')[0];
     return (
@@ -173,7 +178,8 @@ function AppContent() {
     currentPath !== '/student/dashboard' &&
     currentPath !== '/student/profile' &&
     currentPath !== '/student/teachers' &&
-    currentPath !== '/student/support'
+    currentPath !== '/student/support' &&
+    currentPath !== '/student/tasks'
   ) {
     const studentId = currentPath.replace('/student/', '').split('/')[0];
     return (
@@ -243,10 +249,24 @@ function AppContent() {
         </RoleRoute>
       );
 
+    case '/teacher/tasks':
+      return (
+        <RoleRoute allowedRole="teacher" onRedirect={navigate}>
+          <TeacherTasksPage onNavigate={navigate} />
+        </RoleRoute>
+      );
+
     case '/student/support':
       return (
         <RoleRoute allowedRole="student" onRedirect={navigate}>
           <UserSupportPage onNavigate={navigate} />
+        </RoleRoute>
+      );
+
+    case '/student/tasks':
+      return (
+        <RoleRoute allowedRole="student" onRedirect={navigate}>
+          <StudentTasksPage onNavigate={navigate} />
         </RoleRoute>
       );
 

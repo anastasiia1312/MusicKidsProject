@@ -6,6 +6,7 @@ import {
   Folder,
   BarChart2,
   Headphones,
+  BookOpen,
   LogOut,
   User,
   Bell,
@@ -308,45 +309,28 @@ export const TeacherLayout: React.FC<TeacherLayoutProps> = ({
               {!isSidebarCollapsed && <span>Clases</span>}
             </button>
 
-            {/* 3. Tareas (Próximamente) */}
-            <div
-              id="sidebar-item-tareas"
-              title="Tareas (Próximamente)"
-              aria-label="Tareas (Próximamente)"
-              className={`flex items-center ${
-                isSidebarCollapsed ? 'justify-center p-3' : 'justify-between px-4 py-3'
-              } rounded-2xl text-slate-600 font-semibold text-sm cursor-default hover:bg-slate-50/60 transition-colors`}
+            {/* 3. Tareas y Materiales */}
+            <button
+              type="button"
+              id="sidebar-item-tareas-materiales"
+              title="Tareas y Materiales"
+              aria-label="Tareas y Materiales"
+              onClick={() => onNavigate('/teacher/tasks')}
+              className={`w-full flex items-center ${
+                isSidebarCollapsed ? 'justify-center p-3' : 'gap-3.5 px-4 py-3'
+              } rounded-2xl ${
+                activeSection === 'tasks' || activeSection === 'materials'
+                  ? 'bg-[#E8F3F8] text-[#00537A] font-bold'
+                  : 'text-slate-700 hover:bg-slate-50 hover:text-[#00537A] font-semibold'
+              } text-sm cursor-pointer transition-colors text-left`}
             >
-              <div className={`flex items-center ${isSidebarCollapsed ? 'justify-center' : 'gap-3.5'}`}>
-                <FileText className="w-5 h-5 text-slate-400 shrink-0" />
-                {!isSidebarCollapsed && <span>Tareas</span>}
-              </div>
-              {!isSidebarCollapsed && (
-                <span className="bg-[#FFEAA7] text-[#7A5A00] text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                  Próximamente
-                </span>
-              )}
-            </div>
-
-            {/* 4. Materiales (Próximamente) */}
-            <div
-              id="sidebar-item-materiales"
-              title="Materiales (Próximamente)"
-              aria-label="Materiales (Próximamente)"
-              className={`flex items-center ${
-                isSidebarCollapsed ? 'justify-center p-3' : 'justify-between px-4 py-3'
-              } rounded-2xl text-slate-600 font-semibold text-sm cursor-default hover:bg-slate-50/60 transition-colors`}
-            >
-              <div className={`flex items-center ${isSidebarCollapsed ? 'justify-center' : 'gap-3.5'}`}>
-                <Folder className="w-5 h-5 text-slate-400 shrink-0" />
-                {!isSidebarCollapsed && <span>Materiales</span>}
-              </div>
-              {!isSidebarCollapsed && (
-                <span className="bg-[#FFEAA7] text-[#7A5A00] text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                  Próximamente
-                </span>
-              )}
-            </div>
+              <BookOpen
+                className={`w-5 h-5 ${
+                  activeSection === 'tasks' || activeSection === 'materials' ? 'text-[#00537A]' : 'text-slate-500'
+                } shrink-0`}
+              />
+              {!isSidebarCollapsed && <span>Tareas y Materiales</span>}
+            </button>
 
             {/* 5. Estadísticas */}
             <button

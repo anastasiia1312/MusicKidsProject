@@ -324,6 +324,43 @@ service cloud.firestore {
         allow update, delete: if false;
       }
     }
+
+    // Reglas para la colección de Tareas y Materiales (tasks)
+    match /tasks/{taskId} {
+      // Lectura: El profesor creador titular, el alumno asignado, o un administrador activo
+      allow read: if isActiveUser() && (
+        resource.data.teacherId == request.auth.uid ||
+        resource.data.studentId == request.auth.uid ||
+        isActiveAdmin()
+      );
+
+      // Creación: Solo profesores activos creando tareas donde teacherId == request.auth.uid
+      allow create: if isActiveUser()
+                    && currentUserData().get('role', '') == 'teacher'
+                    && request.resource.data.teacherId == request.auth.uid
+                    && request.resource.data.studentId is string
+                    && request.resource.data.title is string
+                    && request.resource.data.title.size() >= 3
+                    && request.resource.data.title.size() <= 150
+                    && request.resource.data.description is string
+                    && request.resource.data.description.size() >= 5;
+
+      // Actualización: Solo el profesor titular activo dueño de la tarea
+      allow update: if isActiveUser()
+                    && currentUserData().get('role', '') == 'teacher'
+                    && resource.data.teacherId == request.auth.uid
+                    && request.resource.data.teacherId == request.auth.uid
+                    && request.resource.data.title is string
+                    && request.resource.data.title.size() >= 3
+                    && request.resource.data.title.size() <= 150
+                    && request.resource.data.description is string
+                    && request.resource.data.description.size() >= 5;
+
+      // Eliminación: Solo el profesor titular activo dueño de la tarea
+      allow delete: if isActiveUser()
+                    && currentUserData().get('role', '') == 'teacher'
+                    && resource.data.teacherId == request.auth.uid;
+    }
   }
 }
 

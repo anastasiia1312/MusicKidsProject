@@ -11,6 +11,7 @@ import {
 } from 'firebase/auth';
 import { getFirestore, type Firestore } from 'firebase/firestore';
 import { getFunctions, type Functions } from 'firebase/functions';
+import { getStorage, type FirebaseStorage } from 'firebase/storage';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Inicialización de la instancia de Firebase (Singleton)
@@ -54,5 +55,8 @@ export const db: Firestore =
 
 // Inicialización de Firebase Cloud Functions en región us-central1
 export const functions: Functions = getFunctions(app, 'us-central1');
+
+// Inicialización de Firebase Storage para adjuntos y archivos multimedia
+export const storage: FirebaseStorage = getStorage(app);
 
 export default app;

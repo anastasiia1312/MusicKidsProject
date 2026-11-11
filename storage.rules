@@ -25,5 +25,22 @@ service firebase.storage {
                        request.resource.contentType == 'image/png' ||
                        request.resource.contentType == 'image/webp');
     }
+
+    // Reglas para la carpeta de adjuntos de tareas y materiales
+    // Ruta: tasks/{teacherId}/{taskId}/{fileName}
+    match /tasks/{teacherId}/{taskId}/{fileName} {
+      // Lectura: Cualquier usuario autenticado en la plataforma
+      allow read: if request.auth != null;
+
+      // Escritura: Solo el profesor titular dueño de la carpeta
+      // Tamaño máximo: 25 MB por archivo
+      allow write: if request.auth != null
+                   && request.auth.uid == teacherId
+                   && request.resource.size <= 25 * 1024 * 1024;
+
+      // Eliminación: Solo el profesor titular dueño de la carpeta
+      allow delete: if request.auth != null
+                    && request.auth.uid == teacherId;
+    }
   }
 }
