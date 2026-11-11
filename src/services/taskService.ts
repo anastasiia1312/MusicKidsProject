@@ -12,6 +12,7 @@ import {
   collection,
   doc,
   addDoc,
+  setDoc,
   getDoc,
   getDocs,
   updateDoc,
@@ -24,6 +25,7 @@ import {
   ref,
   uploadBytes,
   getDownloadURL,
+  getBlob,
   deleteObject,
 } from 'firebase/storage';
 import { db, storage, auth } from './firebase';
@@ -136,6 +138,46 @@ export async function deleteTaskAttachment(storagePath: string): Promise<void> {
 }
 
 /**
+ * Descarga de forma autenticada un archivo adjunto utilizando el SDK de Firebase Storage.
+ * Respeta el modelo de seguridad evaluando las reglas de Storage sin depender de tokens públicos persistentes.
+ */
+export async function downloadAttachmentSecurely(attachment: TaskAttachment): Promise<void> {
+  if (!attachment.path) {
+    if (attachment.url) {
+      window.open(attachment.url, '_blank');
+      return;
+    }
+    throw new Error('No se encontró la ruta del archivo adjunto.');
+  }
+
+  const fileRef = ref(storage, attachment.path);
+  const blob = await getBlob(fileRef);
+  const blobUrl = URL.createObjectURL(blob);
+
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.download = attachment.name || 'archivo_adjunto';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+
+  setTimeout(() => {
+    URL.revokeObjectURL(blobUrl);
+  }, 3000);
+}
+
+/**
+ * Obtiene una URL temporal (Blob URL) autenticada en memoria para previsualizar o reproducir audio.
+ * Respeta las reglas de seguridad sin exponer tokens públicos persistentes.
+ */
+export async function getAuthenticatedBlobUrl(storagePath: string): Promise<string> {
+  if (!storagePath) return '';
+  const fileRef = ref(storage, storagePath);
+  const blob = await getBlob(fileRef);
+  return URL.createObjectURL(blob);
+}
+
+/**
  * Obtiene la lista de alumnos vinculados a un profesor (o alumnos activos disponibles)
  */
 export async function getTeacherLinkedStudents(teacherId: string): Promise<UserProfile[]> {
@@ -173,7 +215,8 @@ export async function createTask(
   teacherId: string,
   teacherName: string,
   teacherEmail: string,
-  payload: CreateTaskPayload
+  payload: CreateTaskPayload,
+  customTaskId?: string
 ): Promise<string> {
   const currentUser = auth.currentUser;
   if (!currentUser || currentUser.uid !== teacherId) {
@@ -216,8 +259,14 @@ export async function createTask(
   };
 
   try {
-    const docRef = await addDoc(collection(db, TASKS_COLLECTION), taskData);
-    return docRef.id;
+    if (customTaskId) {
+      const docRef = doc(db, TASKS_COLLECTION, customTaskId);
+      await setDoc(docRef, taskData);
+      return customTaskId;
+    } else {
+      const docRef = await addDoc(collection(db, TASKS_COLLECTION), taskData);
+      return docRef.id;
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, TASKS_COLLECTION);
     throw error;
@@ -265,22 +314,14 @@ export async function updateTask(
     throw new Error('No tenés permisos para modificar una tarea creada por otro profesor.');
   }
 
-  // Si cambió el alumno, obtener nuevo nombre
-  let studentName = existingData.studentName;
-  let studentEmail = existingData.studentEmail;
-
-  if (studentId !== existingData.studentId) {
-    const studentProfile = await fetchUserProfile(studentId);
-    studentName = studentProfile?.name || 'Alumno MusicKids';
-    studentEmail = studentProfile?.email || '';
+  // Validación de inmutabilidad estricta de studentId (requisito de seguridad)
+  if (studentId && studentId !== existingData.studentId) {
+    throw new Error('El alumno asignado no puede modificarse una vez creada la tarea.');
   }
 
   const updates = {
     title,
     description,
-    studentId,
-    studentName,
-    studentEmail,
     attachments: payload.attachments || [],
     updatedAt: serverTimestamp(),
   };

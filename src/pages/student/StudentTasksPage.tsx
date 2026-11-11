@@ -18,7 +18,11 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { StudentLayout } from '../../components/student/StudentLayout';
-import { getStudentTasks } from '../../services/taskService';
+import {
+  getStudentTasks,
+  downloadAttachmentSecurely,
+  getAuthenticatedBlobUrl,
+} from '../../services/taskService';
 import type { Task, TaskAttachment } from '../../types/task';
 
 interface StudentTasksPageProps {
@@ -33,6 +37,8 @@ export const StudentTasksPage: React.FC<StudentTasksPageProps> = ({ onNavigate }
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [downloadingAttId, setDownloadingAttId] = useState<string | null>(null);
+  const [audioUrls, setAudioUrls] = useState<Record<string, string>>({});
 
   const loadTasks = async () => {
     if (!user?.uid) return;
@@ -52,6 +58,61 @@ export const StudentTasksPage: React.FC<StudentTasksPageProps> = ({ onNavigate }
   useEffect(() => {
     loadTasks();
   }, [user?.uid]);
+
+  // Cargar streams autenticados para pistas de audio
+  useEffect(() => {
+    let isMounted = true;
+    const createdUrls: string[] = [];
+
+    const loadAudioUrls = async () => {
+      const newAudioMap: Record<string, string> = {};
+      for (const t of tasks) {
+        if (Array.isArray(t.attachments)) {
+          for (const att of t.attachments) {
+            const ext = att.name.split('.').pop()?.toLowerCase();
+            const isAudio =
+              att.type?.startsWith('audio/') ||
+              ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac'].includes(ext || '');
+            if (isAudio && att.path) {
+              try {
+                const blobUrl = await getAuthenticatedBlobUrl(att.path);
+                if (blobUrl) {
+                  newAudioMap[att.id] = blobUrl;
+                  createdUrls.push(blobUrl);
+                }
+              } catch (err) {
+                if (att.url) newAudioMap[att.id] = att.url;
+              }
+            }
+          }
+        }
+      }
+      if (isMounted) {
+        setAudioUrls(newAudioMap);
+      }
+    };
+
+    if (tasks.length > 0) {
+      loadAudioUrls();
+    }
+
+    return () => {
+      isMounted = false;
+      createdUrls.forEach((u) => URL.revokeObjectURL(u));
+    };
+  }, [tasks]);
+
+  const handleDownloadAttachment = async (att: TaskAttachment) => {
+    try {
+      setDownloadingAttId(att.id);
+      await downloadAttachmentSecurely(att);
+    } catch (err: any) {
+      console.error('Error al descargar archivo adjunto:', err);
+      alert('No se pudo descargar el archivo. Verificá tu sesión y permisos.');
+    } finally {
+      setDownloadingAttId(null);
+    }
+  };
 
   const formatDate = (val: any) => {
     if (!val) return '';
@@ -253,15 +314,19 @@ export const StudentTasksPage: React.FC<StudentTasksPageProps> = ({ onNavigate }
                                 </div>
                               </div>
 
-                              <a
-                                href={att.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="p-2 rounded-xl bg-[#E8F3F8] text-[#00537A] hover:bg-[#DDF1F8] transition-colors shrink-0"
-                                title="Abrir o descargar archivo"
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadAttachment(att)}
+                                disabled={downloadingAttId === att.id}
+                                className="p-2 rounded-xl bg-[#E8F3F8] text-[#00537A] hover:bg-[#DDF1F8] transition-colors shrink-0 cursor-pointer disabled:opacity-50"
+                                title="Descargar archivo de forma segura"
                               >
-                                <ExternalLink className="w-4 h-4" />
-                              </a>
+                                {downloadingAttId === att.id ? (
+                                  <RefreshCw className="w-4 h-4 animate-spin text-[#00537A]" />
+                                ) : (
+                                  <Download className="w-4 h-4" />
+                                )}
+                              </button>
                             </div>
 
                             {/* Reproductor de audio embebido para pistas musicales */}
@@ -269,7 +334,7 @@ export const StudentTasksPage: React.FC<StudentTasksPageProps> = ({ onNavigate }
                               <div className="pt-1">
                                 <audio
                                   controls
-                                  src={att.url}
+                                  src={audioUrls[att.id] || att.url}
                                   className="w-full h-8"
                                   preload="metadata"
                                 >

@@ -211,10 +211,184 @@ assert(!canUserModifyTask(teacherPablo, task1), 'Un profesor distinto no puede m
 assert(canUserModifyTask(teacherClara, task1), 'La profesora titular puede modificar sus propias tareas');
 
 
+// 3.5 Inmutabilidad estricta de studentId en actualización
+function validateTaskUpdate(existingTask: Task, updates: Partial<Task>): { valid: boolean; error?: string } {
+  if (updates.studentId && updates.studentId !== existingTask.studentId) {
+    return { valid: false, error: 'El alumno asignado no puede modificarse una vez creada la tarea.' };
+  }
+  if (updates.teacherId && updates.teacherId !== existingTask.teacherId) {
+    return { valid: false, error: 'El profesor asignado no puede modificarse.' };
+  }
+  return { valid: true };
+}
+
+const resChangeStudent = validateTaskUpdate(task1, { studentId: 'student_sofia' });
+assert(!resChangeStudent.valid && resChangeStudent.error?.includes('no puede modificarse'), 'Rechaza reasignar el alumno de una tarea existente (studentId inmutable)');
+
+const resChangeTeacher = validateTaskUpdate(task1, { teacherId: 'teacher_pablo' });
+assert(!resChangeTeacher.valid && resChangeTeacher.error?.includes('profesor'), 'Rechaza cambiar el profesor de una tarea existente (teacherId inmutable)');
+
+const resValidUpdate = validateTaskUpdate(task1, { title: 'Nuevo título de estudio', description: 'Nuevas instrucciones' });
+assert(resValidUpdate.valid, 'Permite actualizar título e instrucciones de la tarea');
+
+
 // ========================================================
-// 4. LIMPIEZA ATÓMICA DE ARCHIVOS HUÉRFANOS AL ELIMINAR
+// 4. SIMULACIÓN DE REGLAS DE SEGURIDAD EN STORAGE (CROSS-SERVICE)
 // ========================================================
-console.log('\n--- 4. Eliminación segura sin archivos huérfanos ---');
+console.log('\n--- 4. Simulación de reglas de seguridad en Storage (cross-service) ---');
+
+interface MockStorageContext {
+  auth: { uid: string; role: string; status: string } | null;
+  path: { teacherId: string; taskId: string; fileName: string };
+  resource?: { size: number; contentType: string };
+}
+
+interface MockFirestoreDB {
+  tasks: Record<string, { teacherId: string; studentId: string; title: string }>;
+  users: Record<string, { role: string; status: string }>;
+}
+
+const mockDB: MockFirestoreDB = {
+  tasks: {
+    'task_001': { teacherId: 'teacher_clara', studentId: 'student_mateo', title: 'Minueto' },
+  },
+  users: {
+    'teacher_clara': { role: 'teacher', status: 'active' },
+    'teacher_pablo': { role: 'teacher', status: 'active' },
+    'student_mateo': { role: 'student', status: 'active' },
+    'student_sofia': { role: 'student', status: 'active' },
+    'admin_user': { role: 'admin', status: 'active' },
+  },
+};
+
+function evaluateStorageRead(ctx: MockStorageContext, db: MockFirestoreDB): boolean {
+  if (!ctx.auth) return false;
+
+  // 1. Admin activo
+  const user = db.users[ctx.auth.uid];
+  if (user && user.role === 'admin' && user.status === 'active') return true;
+
+  // 2. Consulta al documento en Firestore
+  const task = db.tasks[ctx.path.taskId];
+  if (task) {
+    // teacherId de la ruta debe coincidir con el del documento
+    if (task.teacherId !== ctx.path.teacherId) return false;
+    // El usuario debe ser el profesor dueño o el alumno asignado
+    return ctx.auth.uid === task.teacherId || ctx.auth.uid === task.studentId;
+  }
+
+  // 3. Si la tarea aún no se guardó (borrador previo)
+  return ctx.auth.uid === ctx.path.teacherId;
+}
+
+function evaluateStorageCreate(ctx: MockStorageContext, db: MockFirestoreDB): boolean {
+  if (!ctx.auth) return false;
+  if (ctx.auth.uid !== ctx.path.teacherId) return false;
+
+  const user = db.users[ctx.auth.uid];
+  if (!user || user.role !== 'teacher' || user.status !== 'active') return false;
+
+  const task = db.tasks[ctx.path.taskId];
+  if (task && task.teacherId !== ctx.path.teacherId) return false;
+
+  if (!ctx.resource || ctx.resource.size > 25 * 1024 * 1024) return false;
+
+  const allowedTypes = [
+    'application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+    'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/aac', 'audio/m4a'
+  ];
+  return allowedTypes.includes(ctx.resource.contentType);
+}
+
+// 4.1 Lectura: Profesora dueña (Clara)
+assert(
+  evaluateStorageRead({
+    auth: { uid: 'teacher_clara', role: 'teacher', status: 'active' },
+    path: { teacherId: 'teacher_clara', taskId: 'task_001', fileName: 'minueto.pdf' },
+  }, mockDB),
+  'Storage: La profesora dueña puede leer sus propios archivos adjuntos'
+);
+
+// 4.2 Lectura: Alumno asignado (Mateo)
+assert(
+  evaluateStorageRead({
+    auth: { uid: 'student_mateo', role: 'student', status: 'active' },
+    path: { teacherId: 'teacher_clara', taskId: 'task_001', fileName: 'minueto.pdf' },
+  }, mockDB),
+  'Storage: El alumno asignado a la tarea puede leer los archivos'
+);
+
+// 4.3 Lectura: Alumna ajena (Sofía)
+assert(
+  !evaluateStorageRead({
+    auth: { uid: 'student_sofia', role: 'student', status: 'active' },
+    path: { teacherId: 'teacher_clara', taskId: 'task_001', fileName: 'minueto.pdf' },
+  }, mockDB),
+  'Storage: Alumno no asignado tiene acceso DENEGADO a los archivos'
+);
+
+// 4.4 Lectura: Profesor ajeno (Pablo)
+assert(
+  !evaluateStorageRead({
+    auth: { uid: 'teacher_pablo', role: 'teacher', status: 'active' },
+    path: { teacherId: 'teacher_clara', taskId: 'task_001', fileName: 'minueto.pdf' },
+  }, mockDB),
+  'Storage: Profesor ajeno tiene acceso DENEGADO a los archivos'
+);
+
+// 4.5 Lectura: Usuario no autenticado
+assert(
+  !evaluateStorageRead({
+    auth: null,
+    path: { teacherId: 'teacher_clara', taskId: 'task_001', fileName: 'minueto.pdf' },
+  }, mockDB),
+  'Storage: Usuario no autenticado tiene acceso DENEGADO'
+);
+
+// 4.6 Lectura: Administrador activo
+assert(
+  evaluateStorageRead({
+    auth: { uid: 'admin_user', role: 'admin', status: 'active' },
+    path: { teacherId: 'teacher_clara', taskId: 'task_001', fileName: 'minueto.pdf' },
+  }, mockDB),
+  'Storage: Administrador activo tiene acceso permitido'
+);
+
+// 4.7 Creación: Profesor dueño con archivo válido (<25 MB)
+assert(
+  evaluateStorageCreate({
+    auth: { uid: 'teacher_clara', role: 'teacher', status: 'active' },
+    path: { teacherId: 'teacher_clara', taskId: 'task_001', fileName: 'partitura.pdf' },
+    resource: { size: 5 * 1024 * 1024, contentType: 'application/pdf' },
+  }, mockDB),
+  'Storage: Profesor dueño puede subir archivos válidos'
+);
+
+// 4.8 Creación: Alumno intenta subir archivo a la tarea
+assert(
+  !evaluateStorageCreate({
+    auth: { uid: 'student_mateo', role: 'student', status: 'active' },
+    path: { teacherId: 'teacher_clara', taskId: 'task_001', fileName: 'tarea_resuelta.pdf' },
+    resource: { size: 1024 * 1024, contentType: 'application/pdf' },
+  }, mockDB),
+  'Storage: Alumno tiene PROHIBIDO subir archivos (solo profesor)'
+);
+
+// 4.9 Creación: Archivo > 25 MB
+assert(
+  !evaluateStorageCreate({
+    auth: { uid: 'teacher_clara', role: 'teacher', status: 'active' },
+    path: { teacherId: 'teacher_clara', taskId: 'task_001', fileName: 'pesado.mp3' },
+    resource: { size: 30 * 1024 * 1024, contentType: 'audio/mp3' },
+  }, mockDB),
+  'Storage: Rechaza subida de archivos mayores a 25 MB'
+);
+
+
+// ========================================================
+// 5. LIMPIEZA ATÓMICA DE ARCHIVOS HUÉRFANOS AL ELIMINAR
+// ========================================================
+console.log('\n--- 5. Eliminación segura sin archivos huérfanos ---');
 
 function getPathsToDeleteOnTaskRemoval(task: Task): string[] {
   if (!Array.isArray(task.attachments)) return [];
@@ -232,4 +406,5 @@ assert(
 const pathsTaskWithoutFiles = getPathsToDeleteOnTaskRemoval(task2);
 assert(pathsTaskWithoutFiles.length === 0, 'La eliminación de tarea sin adjuntos se procesa limpiamente');
 
-console.log('\n🎉 TODAS LAS PRUEBAS DE TAREAS Y MATERIALES PASARON CON ÉXITO.');
+console.log('\n🎉 TODAS LAS PRUEBAS DE SEGURIDAD Y TAREAS PASARON CON ÉXITO.');
+

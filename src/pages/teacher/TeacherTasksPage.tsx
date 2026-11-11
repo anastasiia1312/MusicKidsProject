@@ -22,6 +22,8 @@ import {
   Volume2,
   RefreshCw,
 } from 'lucide-react';
+import { collection, doc } from 'firebase/firestore';
+import { db } from '../../services/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { TeacherLayout } from '../../components/teacher/TeacherLayout';
 import {
@@ -32,6 +34,7 @@ import {
   deleteTask,
   uploadTaskAttachment,
   deleteTaskAttachment,
+  downloadAttachmentSecurely,
 } from '../../services/taskService';
 import type { Task, TaskAttachment } from '../../types/task';
 import type { UserProfile } from '../../types/auth';
@@ -58,12 +61,14 @@ export const TeacherTasksPage: React.FC<TeacherTasksPageProps> = ({ onNavigate }
   // Estados de modal (creación / edición)
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [modalTaskId, setModalTaskId] = useState<string>('');
   const [modalTitle, setModalTitle] = useState('');
   const [modalDescription, setModalDescription] = useState('');
   const [modalStudentId, setModalStudentId] = useState('');
   const [modalAttachments, setModalAttachments] = useState<TaskAttachment[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
+  const [downloadingAttId, setDownloadingAttId] = useState<string | null>(null);
 
   // Estado de subida de archivos
   const [uploadingFiles, setUploadingFiles] = useState(false);
@@ -72,6 +77,19 @@ export const TeacherTasksPage: React.FC<TeacherTasksPageProps> = ({ onNavigate }
   // Modal de confirmación de eliminación
   const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Descarga segura autenticada de archivos adjuntos
+  const handleDownloadAttachment = async (att: TaskAttachment) => {
+    try {
+      setDownloadingAttId(att.id);
+      await downloadAttachmentSecurely(att);
+    } catch (err: any) {
+      console.error('Error al descargar archivo adjunto:', err);
+      setErrorMessage('No se pudo descargar el archivo. Verificá tus permisos o conexión.');
+    } finally {
+      setDownloadingAttId(null);
+    }
+  };
 
   // Carga inicial de tareas y lista de alumnos vinculados
   const loadData = async () => {
@@ -110,7 +128,9 @@ export const TeacherTasksPage: React.FC<TeacherTasksPageProps> = ({ onNavigate }
 
   // Abrir modal en modo "Nueva tarea"
   const handleOpenCreateModal = () => {
+    const newId = doc(collection(db, 'tasks')).id;
     setEditingTaskId(null);
+    setModalTaskId(newId);
     setModalTitle('');
     setModalDescription('');
     setModalStudentId(students.length > 0 ? students[0].uid : '');
@@ -122,6 +142,7 @@ export const TeacherTasksPage: React.FC<TeacherTasksPageProps> = ({ onNavigate }
   // Abrir modal en modo "Editar tarea"
   const handleOpenEditModal = (task: Task) => {
     setEditingTaskId(task.id);
+    setModalTaskId(task.id);
     setModalTitle(task.title);
     setModalDescription(task.description);
     setModalStudentId(task.studentId);
@@ -134,6 +155,7 @@ export const TeacherTasksPage: React.FC<TeacherTasksPageProps> = ({ onNavigate }
     if (isSubmitting || uploadingFiles) return;
     setIsModalOpen(false);
     setEditingTaskId(null);
+    setModalTaskId('');
     setModalTitle('');
     setModalDescription('');
     setModalAttachments([]);
@@ -148,13 +170,16 @@ export const TeacherTasksPage: React.FC<TeacherTasksPageProps> = ({ onNavigate }
     setUploadingFiles(true);
     setModalError(null);
 
-    const tempFolderId = editingTaskId || `temp_${Date.now()}`;
+    // Asegurar que la ruta en Storage coincida exactamente con el taskId de Firestore
+    const targetTaskId = modalTaskId || editingTaskId || doc(collection(db, 'tasks')).id;
+    if (!modalTaskId) setModalTaskId(targetTaskId);
+
     const newAttachments: TaskAttachment[] = [];
 
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const uploaded = await uploadTaskAttachment(user.uid, tempFolderId, file);
+        const uploaded = await uploadTaskAttachment(user.uid, targetTaskId, file);
         newAttachments.push(uploaded);
       }
       setModalAttachments((prev) => [...prev, ...newAttachments]);
@@ -216,7 +241,7 @@ export const TeacherTasksPage: React.FC<TeacherTasksPageProps> = ({ onNavigate }
         });
         setSuccessMessage('¡Tarea actualizada correctamente!');
       } else {
-        // Crear nueva tarea
+        // Crear nueva tarea asignando el taskId predeterminado coincidente con Storage
         await createTask(
           user.uid,
           userProfile?.name || 'Profesor MusicKids',
@@ -226,7 +251,8 @@ export const TeacherTasksPage: React.FC<TeacherTasksPageProps> = ({ onNavigate }
             description: trimmedDesc,
             studentId: modalStudentId,
             attachments: modalAttachments,
-          }
+          },
+          modalTaskId
         );
         setSuccessMessage('¡Tarea creada y asignada exitosamente!');
       }
@@ -471,19 +497,23 @@ export const TeacherTasksPage: React.FC<TeacherTasksPageProps> = ({ onNavigate }
                       </span>
                       <div className="flex flex-wrap gap-2">
                         {task.attachments.map((att) => (
-                          <a
+                          <button
                             key={att.id}
-                            href={att.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 hover:bg-[#E8F3F8] hover:border-[#00537A]/30 text-xs font-semibold text-slate-700 hover:text-[#00537A] transition-colors group/att"
+                            type="button"
+                            onClick={() => handleDownloadAttachment(att)}
+                            disabled={downloadingAttId === att.id}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 hover:bg-[#E8F3F8] hover:border-[#00537A]/30 text-xs font-semibold text-slate-700 hover:text-[#00537A] transition-colors group/att cursor-pointer disabled:opacity-50"
                             title={`Descargar ${att.name} (${formatFileSize(att.size)})`}
                           >
                             {renderAttachmentIcon(att)}
                             <span className="max-w-[140px] truncate">{att.name}</span>
                             <span className="text-[10px] text-slate-400">({formatFileSize(att.size)})</span>
-                            <Download className="w-3 h-3 text-slate-400 group-hover/att:text-[#00537A]" />
-                          </a>
+                            {downloadingAttId === att.id ? (
+                              <RefreshCw className="w-3 h-3 text-[#00537A] animate-spin" />
+                            ) : (
+                              <Download className="w-3 h-3 text-slate-400 group-hover/att:text-[#00537A]" />
+                            )}
+                          </button>
                         ))}
                       </div>
                     </div>
@@ -592,8 +622,11 @@ export const TeacherTasksPage: React.FC<TeacherTasksPageProps> = ({ onNavigate }
                   id="task-student-select"
                   value={modalStudentId}
                   onChange={(e) => setModalStudentId(e.target.value)}
+                  disabled={Boolean(editingTaskId)}
                   required
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#00537A] focus:bg-white transition-all"
+                  className={`w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#00537A] focus:bg-white transition-all ${
+                    editingTaskId ? 'opacity-70 cursor-not-allowed bg-slate-100' : ''
+                  }`}
                 >
                   {students.map((st) => (
                     <option key={st.uid} value={st.uid}>
@@ -601,9 +634,15 @@ export const TeacherTasksPage: React.FC<TeacherTasksPageProps> = ({ onNavigate }
                     </option>
                   ))}
                 </select>
-                <span className="text-[11px] text-slate-400 mt-1 block">
-                  El alumno verá esta tarea exclusivamente en su dashboard personal.
-                </span>
+                {editingTaskId ? (
+                  <span className="text-[11px] text-amber-700 font-semibold mt-1 block">
+                    El alumno asignado no puede modificarse en una tarea ya creada.
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-slate-400 mt-1 block">
+                    El alumno verá esta tarea exclusivamente en su dashboard personal.
+                  </span>
+                )}
               </div>
 
               {/* Título de la tarea */}

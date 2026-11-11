@@ -4,21 +4,81 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     
-    // Reglas para la carpeta de avatares de usuario
+    // Función auxiliar: Usuario autenticado
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Funciones auxiliares para consultar Firestore desde Storage
+    function taskExists(taskId) {
+      return firestore.exists(/databases/(default)/documents/tasks/$(taskId));
+    }
+
+    function getTaskData(taskId) {
+      return firestore.get(/databases/(default)/documents/tasks/$(taskId)).data;
+    }
+
+    function userExists(uid) {
+      return firestore.exists(/databases/(default)/documents/users/$(uid));
+    }
+
+    function getUserData(uid) {
+      return firestore.get(/databases/(default)/documents/users/$(uid)).data;
+    }
+
+    // Administrador activo del sistema
+    function isActiveAdmin() {
+      return isSignedIn()
+        && userExists(request.auth.uid)
+        && getUserData(request.auth.uid).get('role', '') == 'admin'
+        && getUserData(request.auth.uid).get('status', 'active') == 'active';
+    }
+
+    // Profesor activo del sistema
+    function isActiveTeacher() {
+      return isSignedIn()
+        && userExists(request.auth.uid)
+        && getUserData(request.auth.uid).get('role', '') == 'teacher'
+        && getUserData(request.auth.uid).get('status', 'active') == 'active';
+    }
+
+    // Validación de tipos MIME permitidos para adjuntos de tareas y materiales:
+    // Partituras y documentos PDF, imágenes (JPEG, PNG, WebP, GIF), y pistas de audio (MP3, WAV, OGG, AAC, M4A, FLAC, MIDI)
+    function isAllowedTaskMimeType() {
+      return request.resource.contentType == 'application/pdf'
+          || request.resource.contentType == 'image/jpeg'
+          || request.resource.contentType == 'image/png'
+          || request.resource.contentType == 'image/webp'
+          || request.resource.contentType == 'image/gif'
+          || request.resource.contentType == 'audio/mpeg'
+          || request.resource.contentType == 'audio/mp3'
+          || request.resource.contentType == 'audio/wav'
+          || request.resource.contentType == 'audio/x-wav'
+          || request.resource.contentType == 'audio/ogg'
+          || request.resource.contentType == 'audio/aac'
+          || request.resource.contentType == 'audio/x-m4a'
+          || request.resource.contentType == 'audio/m4a'
+          || request.resource.contentType == 'audio/flac'
+          || request.resource.contentType == 'audio/midi'
+          || request.resource.contentType == 'audio/x-midi'
+          || request.resource.contentType == 'application/octet-stream';
+    }
+
+    // Reglas para la carpeta de avatares de usuario (Intactas)
     // Ruta: avatars/{userId}/{fileName}
     match /avatars/{userId}/{fileName} {
       
       // Lectura: Cualquier usuario autenticado puede visualizar avatares
       // (Permite que alumnos vean avatares de profesores y profesores de alumnos)
-      allow read: if request.auth != null;
+      allow read: if isSignedIn();
 
       // Escritura: Solo el usuario autenticado dueño de su carpeta puede subir/modificar su avatar
       // Validaciones de seguridad:
-      // 1. request.auth != null (autenticado)
+      // 1. isSignedIn() (autenticado)
       // 2. request.auth.uid == userId (dueño de la carpeta correspondiente)
       // 3. Tamaño máximo de archivo: 5 MB (5 * 1024 * 1024 = 5242880 bytes)
       // 4. Formatos de imagen permitidos: JPEG, PNG o WebP
-      allow write: if request.auth != null
+      allow write: if isSignedIn()
                    && request.auth.uid == userId
                    && request.resource.size <= 5 * 1024 * 1024
                    && (request.resource.contentType == 'image/jpeg' ||
@@ -29,18 +89,53 @@ service firebase.storage {
     // Reglas para la carpeta de adjuntos de tareas y materiales
     // Ruta: tasks/{teacherId}/{taskId}/{fileName}
     match /tasks/{teacherId}/{taskId}/{fileName} {
-      // Lectura: Cualquier usuario autenticado en la plataforma
-      allow read: if request.auth != null;
+      
+      // Lectura segura:
+      // 1. Administrador activo
+      // 2. Si la tarea existe en Firestore:
+      //    - El teacherId de la ruta DEBE coincidir con el teacherId del documento
+      //    - El usuario autenticado debe ser el profesor titular (request.auth.uid == teacherId)
+      //      O el alumno asignado a la tarea (getTaskData(taskId).studentId == request.auth.uid)
+      // 3. Si la tarea aún no se guardó en Firestore (fase preliminar de subida del borrador por el profesor):
+      //    - Únicamente el profesor autenticado dueño de su carpeta (request.auth.uid == teacherId)
+      allow read: if isSignedIn() && (
+        isActiveAdmin() ||
+        (
+          taskExists(taskId) &&
+          getTaskData(taskId).teacherId == teacherId &&
+          (
+            request.auth.uid == teacherId ||
+            getTaskData(taskId).studentId == request.auth.uid
+          )
+        ) ||
+        (
+          !taskExists(taskId) &&
+          request.auth.uid == teacherId
+        )
+      );
 
-      // Escritura: Solo el profesor titular dueño de la carpeta
-      // Tamaño máximo: 25 MB por archivo
-      allow write: if request.auth != null
-                   && request.auth.uid == teacherId
-                   && request.resource.size <= 25 * 1024 * 1024;
+      // Creación (Subida de archivos):
+      // - Solo el profesor titular autenticado dueño de la carpeta (request.auth.uid == teacherId)
+      // - Debe ser un profesor activo en Firestore
+      // - Si la tarea ya existe en Firestore, el teacherId del documento debe coincidir
+      // - Tamaño máximo: 25 MB por archivo (25 * 1024 * 1024 bytes)
+      // - Validación estricta de tipos MIME permitidos
+      allow create: if isSignedIn()
+                    && request.auth.uid == teacherId
+                    && isActiveTeacher()
+                    && (!taskExists(taskId) || getTaskData(taskId).teacherId == teacherId)
+                    && request.resource.size <= 25 * 1024 * 1024
+                    && isAllowedTaskMimeType();
 
-      // Eliminación: Solo el profesor titular dueño de la carpeta
-      allow delete: if request.auth != null
-                    && request.auth.uid == teacherId;
+      // Actualización prohibida (los archivos adjuntos son inmutables)
+      allow update: if false;
+
+      // Eliminación:
+      // - Solo el profesor titular autenticado dueño de la carpeta (request.auth.uid == teacherId)
+      // - Si la tarea existe en Firestore, su teacherId debe coincidir
+      allow delete: if isSignedIn()
+                    && request.auth.uid == teacherId
+                    && (!taskExists(taskId) || getTaskData(taskId).teacherId == teacherId);
     }
   }
 }

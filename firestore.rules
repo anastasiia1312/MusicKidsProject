@@ -30,6 +30,13 @@ service cloud.firestore {
         && currentUserData().get('role', '') == 'admin' 
         && currentUserData().get('status', 'active') == 'active';
     }
+
+    // Verificar si un usuario específico existe, tiene rol de alumno y cuenta activa
+    function isActiveStudentUser(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId))
+        && get(/databases/$(database)/documents/users/$(userId)).data.get('role', '') == 'student'
+        && get(/databases/$(database)/documents/users/$(userId)).data.get('status', 'active') == 'active';
+    }
     
     // Reglas para la colección de usuarios
     match /users/{userId} {
@@ -328,35 +335,58 @@ service cloud.firestore {
     // Reglas para la colección de Tareas y Materiales (tasks)
     match /tasks/{taskId} {
       // Lectura: El profesor creador titular, el alumno asignado, o un administrador activo
-      allow read: if isActiveUser() && (
-        resource.data.teacherId == request.auth.uid ||
-        resource.data.studentId == request.auth.uid ||
-        isActiveAdmin()
+      allow read: if isActiveAdmin() || (
+        isActiveUser() && (
+          resource.data.teacherId == request.auth.uid ||
+          resource.data.studentId == request.auth.uid
+        )
       );
 
-      // Creación: Solo profesores activos creando tareas donde teacherId == request.auth.uid
+      // Creación:
+      // - Solo profesores activos (role == 'teacher' y status == 'active')
+      // - teacherId debe coincidir estrictamente con el UID autenticado
+      // - El alumno asignado debe ser un alumno registrado, activo y diferente del profesor
+      // - Validación estricta de campos obligatorios:
+      //   * title: string entre 3 y 150 caracteres
+      //   * description: string entre 5 y 10.000 caracteres
+      //   * studentId: string no vacío
+      //   * createdAt: debe estar presente
       allow create: if isActiveUser()
                     && currentUserData().get('role', '') == 'teacher'
                     && request.resource.data.teacherId == request.auth.uid
                     && request.resource.data.studentId is string
+                    && request.resource.data.studentId != request.auth.uid
+                    && isActiveStudentUser(request.resource.data.studentId)
                     && request.resource.data.title is string
                     && request.resource.data.title.size() >= 3
                     && request.resource.data.title.size() <= 150
                     && request.resource.data.description is string
-                    && request.resource.data.description.size() >= 5;
+                    && request.resource.data.description.size() >= 5
+                    && request.resource.data.description.size() <= 10000
+                    && request.resource.data.createdAt != null;
 
-      // Actualización: Solo el profesor titular activo dueño de la tarea
+      // Actualización:
+      // - Solo el profesor titular activo dueño de la tarea (resource.data.teacherId == request.auth.uid)
+      // - INMUTABILIDAD estricta de campos sensibles:
+      //   * teacherId no puede modificarse
+      //   * studentId no puede modificarse
+      //   * createdAt no puede modificarse
+      // - Validación de campos editables (title y description)
       allow update: if isActiveUser()
                     && currentUserData().get('role', '') == 'teacher'
                     && resource.data.teacherId == request.auth.uid
-                    && request.resource.data.teacherId == request.auth.uid
+                    && request.resource.data.teacherId == resource.data.teacherId
+                    && request.resource.data.studentId == resource.data.studentId
+                    && request.resource.data.createdAt == resource.data.createdAt
                     && request.resource.data.title is string
                     && request.resource.data.title.size() >= 3
                     && request.resource.data.title.size() <= 150
                     && request.resource.data.description is string
-                    && request.resource.data.description.size() >= 5;
+                    && request.resource.data.description.size() >= 5
+                    && request.resource.data.description.size() <= 10000;
 
-      // Eliminación: Solo el profesor titular activo dueño de la tarea
+      // Eliminación:
+      // - Exclusivamente el profesor titular activo dueño de la tarea
       allow delete: if isActiveUser()
                     && currentUserData().get('role', '') == 'teacher'
                     && resource.data.teacherId == request.auth.uid;
