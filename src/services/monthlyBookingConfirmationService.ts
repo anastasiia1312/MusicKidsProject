@@ -898,6 +898,14 @@ export function reconstructMonthlyBookingsFromLessons(
       Math.max(1, Math.round(groupLessons.length / 4))
     ) as 1 | 2 | 3;
 
+    const expObj = (first as any).expiresAt;
+    const expTime = expObj?.toDate
+      ? expObj.toDate().getTime()
+      : expObj
+      ? new Date(expObj).getTime()
+      : 0;
+    const isActuallyExpired = isPending && expTime > 0 && expTime <= Date.now();
+
     result.push({
       id: bookingId,
       teacherId,
@@ -910,7 +918,11 @@ export function reconstructMonthlyBookingsFromLessons(
       totalLessons: groupLessons.length,
       lessonIds: groupLessons.map((l) => l.id),
       occurrences,
-      status: isPending ? 'pending_payment_confirmation' : 'confirmed',
+      status: isActuallyExpired
+        ? 'expired'
+        : isPending
+        ? 'pending_payment_confirmation'
+        : 'confirmed',
       totalPrice: (first as any).totalPrice || (first as any).price || 0,
       price: (first as any).price || 0,
       currency: 'ARS',
@@ -935,6 +947,58 @@ export function reconstructMonthlyBookingsFromLessons(
   });
 }
 
+// Caché en memoria para evitar llamadas redundantes o bucles al backend si la función no está desplegada
+const requestedExpirationsCache = new Map<string, number>();
+const EXPIRATION_REQUEST_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutos de enfriamiento por bookingId
+let hasLoggedMissingFunctionWarning = false;
+
+/**
+ * Solicita la ejecución de la expiración de abonos mensuales al backend (Cloud Function v2)
+ * Incluye protección contra bucles de llamadas y control de errores si la función aún no fue desplegada.
+ */
+export async function requestExpireMonthlyBookings(bookingId?: string): Promise<boolean> {
+  const cacheKey = bookingId ? bookingId.trim() : '__global__';
+  const lastAttempt = requestedExpirationsCache.get(cacheKey) || 0;
+  const now = Date.now();
+
+  // Si ya se intentó recientemente, no volver a invocar para evitar bucles
+  if (now - lastAttempt < EXPIRATION_REQUEST_COOLDOWN_MS) {
+    return false;
+  }
+
+  requestedExpirationsCache.set(cacheKey, now);
+
+  try {
+    const expireFn = httpsCallable<
+      { bookingId?: string },
+      { success: boolean; expiredCount: number }
+    >(functions, 'expirePendingMonthlyBookingsCallable');
+    const res = await expireFn({ bookingId });
+    return Boolean(res.data?.success);
+  } catch (err: any) {
+    const errCode = (err?.code || '').toString().toLowerCase();
+    const errMsg = (err?.message || '').toString().toLowerCase();
+
+    // Si la función aún no fue desplegada en Firebase ('not-found' o 'internal'), registrar una sola vez discretamente
+    if (
+      errCode.includes('not-found') ||
+      errCode.includes('internal') ||
+      errMsg.includes('not-found') ||
+      errMsg.includes('internal')
+    ) {
+      if (!hasLoggedMissingFunctionWarning) {
+        console.info(
+          'La Cloud Function de expiración automática aún no se encuentra desplegada en Firebase; el frontend gestionará la visibilidad y liberación de horarios localmente de forma consistente.'
+        );
+        hasLoggedMissingFunctionWarning = true;
+      }
+    } else {
+      console.warn('Aviso al solicitar expiración de abono mensual:', err);
+    }
+    return false;
+  }
+}
+
 /**
  * Consulta los abonos mensuales del profesor autenticado.
  * 1. Intenta consulta directa a Firestore 'monthlyBookings' con filtro teacherId.
@@ -954,10 +1018,33 @@ export async function getTeacherMonthlyBookings(
       where('teacherId', '==', teacherId)
     );
     const snap = await getDocs(q);
-    const bookings: MonthlyBooking[] = snap.docs.map((d) => ({
-      id: d.id,
-      ...(d.data() as any),
-    }));
+    const bookings: MonthlyBooking[] = snap.docs.map((d) => {
+      const data = d.data() as any;
+      let status = data.status;
+
+      // Si es un abono pendiente y ya transcurrieron las 24 horas, marcarlo como 'expired'
+      if (status === 'pending_payment_confirmation' || status === 'pending_payment') {
+        const exp = data.expiresAt;
+        const expTime = exp?.toDate
+          ? exp.toDate().getTime()
+          : exp
+          ? new Date(exp).getTime()
+          : 0;
+        if (expTime > 0 && expTime <= Date.now()) {
+          status = 'expired';
+          // Disparar en segundo plano la persistencia atómica en backend sin repetir llamadas
+          if (!requestedExpirationsCache.has(d.id)) {
+            requestExpireMonthlyBookings(d.id).catch(() => {});
+          }
+        }
+      }
+
+      return {
+        id: d.id,
+        ...data,
+        status,
+      };
+    });
 
     return bookings.sort((a, b) => {
       const aTime = a.createdAt?.toDate

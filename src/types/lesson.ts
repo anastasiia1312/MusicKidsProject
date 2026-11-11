@@ -5,7 +5,7 @@ import { Timestamp } from 'firebase/firestore';
  */
 export const LESSON_DURATION_MINUTES = 45;
 
-export type LessonStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
+export type LessonStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled' | 'expired';
 
 export interface Lesson {
   id: string;

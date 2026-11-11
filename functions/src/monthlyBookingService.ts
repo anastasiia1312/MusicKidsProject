@@ -14,6 +14,7 @@ import type {
   ConfirmMonthlyBookingPaymentResponse,
   GetTeacherPublicAvailabilityResponse,
   SanitizedOccupiedInterval,
+  ExpireMonthlyBookingsResponse,
 } from './types';
 
 const MONTH_NAMES_SPANISH = [
@@ -728,6 +729,28 @@ export async function confirmMonthlyBookingPaymentTransaction(
     console.warn('Aviso al consultar lecciones vinculadas:', err);
   }
 
+  // Verificación previa de expiración y persistencia atómica si ya vencieron las 24h
+  const preBookingSnap = await bookingRef.get().catch(() => null);
+  if (preBookingSnap && preBookingSnap.exists) {
+    const bData = preBookingSnap.data()!;
+    let isExpired = bData.status === 'expired';
+    if (!isExpired && bData.expiresAt && bData.status !== 'confirmed') {
+      const expMs = bData.expiresAt.toDate
+        ? bData.expiresAt.toDate().getTime()
+        : new Date(bData.expiresAt).getTime();
+      if (!isNaN(expMs) && expMs <= nowServer.getTime()) {
+        isExpired = true;
+      }
+    }
+    if (isExpired && bData.status !== 'confirmed') {
+      await expireSingleBookingDocument(db, bookingId.trim());
+      throw new HttpsError(
+        'failed-precondition',
+        'El plazo de retención de 24 horas ha vencido. El abono se encuentra expirado y los horarios han sido liberados.'
+      );
+    }
+  }
+
   return await db.runTransaction(async (transaction) => {
     // ==========================================
     // 1. TODAS LAS LECTURAS (READS) PRIMERO
@@ -807,18 +830,11 @@ export async function confirmMonthlyBookingPaymentTransaction(
     }
 
     // Verificar si ya transcurrieron las 24 horas
-    if (bookingData.expiresAt?.toDate) {
-      const expMs = bookingData.expiresAt.toDate().getTime();
-      if (expMs <= nowServer.getTime()) {
-        transaction.set(
-          bookingRef,
-          {
-            status: 'expired',
-            expiredAt: admin.firestore.FieldValue.serverTimestamp(),
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          },
-          { merge: true }
-        );
+    if (bookingData.expiresAt) {
+      const expMs = bookingData.expiresAt.toDate
+        ? bookingData.expiresAt.toDate().getTime()
+        : new Date(bookingData.expiresAt).getTime();
+      if (!isNaN(expMs) && expMs <= nowServer.getTime()) {
         throw new HttpsError(
           'failed-precondition',
           'El plazo de retención de 24 horas ha vencido. El abono se encuentra expirado y los horarios han sido liberados.'
@@ -1062,3 +1078,232 @@ export async function getTeacherPublicAvailabilityHelper(
     blockedDates,
   };
 }
+
+/**
+ * Realiza la expiración atómica e idempotente de un abono mensual específico
+ * y libera todos sus horarios en lessons, teacherDailySchedule y teacherSlotLocks.
+ */
+export async function expireSingleBookingDocument(
+  db: admin.firestore.Firestore,
+  bookingId: string
+): Promise<{ success: boolean; reason?: string; bookingId: string }> {
+  const sanitizedBookingId = bookingId.trim();
+  const bookingRef = db.doc(`monthlyBookings/${sanitizedBookingId}`);
+
+  // Consultar lecciones vinculadas
+  const linkedLessonsSnap = await db
+    .collection('lessons')
+    .where('monthlyBookingId', '==', sanitizedBookingId)
+    .get();
+
+  return await db.runTransaction(async (transaction) => {
+    const bookingSnap = await transaction.get(bookingRef);
+    if (!bookingSnap.exists && linkedLessonsSnap.empty) {
+      return { success: false, reason: 'not_found', bookingId: sanitizedBookingId };
+    }
+
+    const bookingData = bookingSnap.exists ? bookingSnap.data()! : null;
+
+    // Regla de seguridad crítica: NUNCA expirar un abono ya confirmado
+    if (bookingData?.status === 'confirmed') {
+      return { success: false, reason: 'already_confirmed', bookingId: sanitizedBookingId };
+    }
+
+    const teacherId = bookingData?.teacherId || (linkedLessonsSnap.docs[0]?.data()?.teacherId ?? '');
+    const occurrences: ProjectedClassOccurrence[] = bookingData?.occurrences || [];
+    const uniqueDates = Array.from(
+      new Set([
+        ...occurrences.map((o: any) => o.date).filter(Boolean),
+        ...linkedLessonsSnap.docs.map((d) => {
+          const lData = d.data();
+          if (typeof lData.date === 'string') return lData.date.substring(0, 10);
+          if (lData.date?.toDate) {
+            const dt = lData.date.toDate();
+            return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(
+              dt.getDate()
+            ).padStart(2, '0')}`;
+          }
+          return '';
+        }).filter(Boolean),
+      ])
+    );
+
+    // 1. Lecturas previas
+    // a. Lectura de teacherDailySchedule
+    const schedDocs: Record<
+      string,
+      { ref: admin.firestore.DocumentReference; intervals: DailyIntervalSlot[] }
+    > = {};
+    if (teacherId) {
+      for (const dStr of uniqueDates) {
+        const schedRef = db.doc(`teacherDailySchedule/${teacherId}_${dStr}`);
+        const schedSnap = await transaction.get(schedRef);
+        schedDocs[dStr] = {
+          ref: schedRef,
+          intervals: schedSnap.exists ? (schedSnap.data()?.intervals || []) : [],
+        };
+      }
+    }
+
+    // b. Lecturas previas de teacherSlotLocks (estricto Firestore: todas las lecturas ANTES de escrituras)
+    const slotLockSnaps: {
+      ref: admin.firestore.DocumentReference;
+      snap: admin.firestore.DocumentSnapshot;
+    }[] = [];
+    if (teacherId) {
+      for (const occ of occurrences) {
+        if (occ.date && occ.startTime) {
+          const lockKey = generateSlotLockKey(teacherId, occ.date, occ.startTime);
+          const lockRef = db.doc(`teacherSlotLocks/${lockKey}`);
+          const lockSnap = await transaction.get(lockRef);
+          slotLockSnaps.push({ ref: lockRef, snap: lockSnap });
+        }
+      }
+    }
+
+    // 2. Escrituras
+    // a. Marcar el abono como expired en monthlyBookings
+    if (bookingSnap.exists) {
+      transaction.set(
+        bookingRef,
+        {
+          status: 'expired',
+          expiredAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    }
+
+    // b. Marcar todas las lecciones del abono como expired para que no bloqueen horarios ni aparezcan como pendientes
+    for (const lDoc of linkedLessonsSnap.docs) {
+      const lData = lDoc.data();
+      if (lData.paymentStatus !== 'confirmed') {
+        transaction.set(
+          lDoc.ref,
+          {
+            status: 'expired',
+            paymentStatus: 'expired',
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+    }
+
+    // c. Actualizar los intervalos de teacherDailySchedule a expired
+    if (teacherId) {
+      for (const dStr of uniqueDates) {
+        const sched = schedDocs[dStr];
+        if (!sched) continue;
+        const updated = sched.intervals.map((slot) => {
+          if (slot.bookingId === sanitizedBookingId && slot.status !== 'confirmed') {
+            return {
+              ...slot,
+              status: 'expired' as const,
+            };
+          }
+          return slot;
+        });
+        transaction.set(
+          sched.ref,
+          {
+            intervals: updated,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+    }
+
+    // d. Liberar los cerrojos de teacherSlotLocks SOLO SI pertenecen a este abono
+    // Si otro alumno reservó el horario tras expirar, su nuevo cerrojo se preserva intacto.
+    for (const { ref: lockRef, snap: lockSnap } of slotLockSnaps) {
+      if (lockSnap.exists) {
+        const lockData = lockSnap.data();
+        if (lockData && lockData.bookingId === sanitizedBookingId) {
+          transaction.delete(lockRef);
+        }
+      }
+    }
+
+    return { success: true, bookingId: sanitizedBookingId };
+  });
+}
+
+/**
+ * Procesa la expiración automática de abonos mensuales pendientes de pago
+ * que hayan superado las 24 horas.
+ *
+ * Características:
+ * - Idempotente: puede ejecutarse repetidamente sin efectos secundarios.
+ * - Concurrencia segura: cada abono se procesa en una transacción independiente.
+ * - Preserva confirmados: nunca toca abonos o lecciones confirmadas.
+ */
+export async function expireMonthlyBookingsBatch(
+  db: admin.firestore.Firestore,
+  targetBookingId?: string
+): Promise<ExpireMonthlyBookingsResponse> {
+  const { now: nowServer } = getBuenosAiresNow();
+  const nowMs = nowServer.getTime();
+
+  let candidateBookings: { id: string; expiresAt?: any; status: string }[] = [];
+
+  if (targetBookingId && typeof targetBookingId === 'string' && targetBookingId.trim()) {
+    const docSnap = await db.doc(`monthlyBookings/${targetBookingId.trim()}`).get();
+    if (docSnap.exists) {
+      candidateBookings.push({ id: docSnap.id, ...docSnap.data() } as any);
+    }
+  } else {
+    // Consultar todos los abonos en estado pendiente
+    const q1 = await db
+      .collection('monthlyBookings')
+      .where('status', 'in', [
+        'pending_payment_confirmation',
+        'pending_payment',
+        'pending_confirmation',
+        'pending',
+      ])
+      .get();
+
+    candidateBookings = q1.docs.map((d) => ({ id: d.id, ...d.data() } as any));
+  }
+
+  const expiredBookingIds: string[] = [];
+
+  for (const b of candidateBookings) {
+    if (b.status === 'confirmed' || b.status === 'cancelled') {
+      continue;
+    }
+
+    let isExpired = false;
+    if (b.expiresAt) {
+      const expMs = b.expiresAt?.toDate
+        ? b.expiresAt.toDate().getTime()
+        : new Date(b.expiresAt).getTime();
+      if (!isNaN(expMs) && expMs <= nowMs) {
+        isExpired = true;
+      }
+    }
+
+    if (isExpired || b.status === 'expired') {
+      try {
+        const res = await expireSingleBookingDocument(db, b.id);
+        if (res.success) {
+          expiredBookingIds.push(b.id);
+        }
+      } catch (err) {
+        console.error(`Error al expirar abono ${b.id}:`, err);
+      }
+    }
+  }
+
+  return {
+    success: true,
+    totalChecked: candidateBookings.length,
+    expiredCount: expiredBookingIds.length,
+    expiredBookingIds,
+    message: `Proceso de expiración completado. ${expiredBookingIds.length} abono(s) expirado(s) y horarios liberados.`,
+  };
+}
+

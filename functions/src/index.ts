@@ -5,6 +5,7 @@
  */
 
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { initializeApp, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import type {
@@ -16,11 +17,14 @@ import type {
   ConfirmMonthlyBookingPaymentResponse,
   GetTeacherPublicAvailabilityPayload,
   GetTeacherPublicAvailabilityResponse,
+  ExpireMonthlyBookingsPayload,
+  ExpireMonthlyBookingsResponse,
 } from './types';
 import {
   createMonthlyBookingTransaction,
   confirmMonthlyBookingPaymentTransaction,
   getTeacherPublicAvailabilityHelper,
+  expireMonthlyBookingsBatch,
 } from './monthlyBookingService';
 import { createManualLessonTransaction } from './manualLessonService';
 
@@ -216,3 +220,59 @@ export const getTeacherPublicAvailability = onCall(
     return await getTeacherPublicAvailabilityHelper(db, data.teacherId, data.month);
   }
 );
+
+/**
+ * Cloud Function v2 Programada (Scheduler): Expiración automática de abonos mensuales
+ * Ejecución cada 5 minutos en zona horaria America/Argentina/Buenos_Aires.
+ *
+ * Características:
+ * - Detecta abonos en 'pending_payment_confirmation' o 'pending_payment' con expiresAt <= now.
+ * - Idempotente: libera los horarios y pasa el abono y sus lecciones a 'expired'.
+ * - No afecta abonos confirmados ni reservas canceladas.
+ * - Concurrencia segura: serialización atómica en Firestore.
+ */
+export const expirePendingMonthlyBookingsScheduled = onSchedule(
+  {
+    schedule: 'every 5 minutes',
+    timeZone: 'America/Argentina/Buenos_Aires',
+    region: 'us-central1',
+  },
+  async () => {
+    try {
+      const result = await expireMonthlyBookingsBatch(db);
+      if (result.expiredCount > 0) {
+        console.log(`[Scheduler] Expiración automática: ${result.expiredCount} abono(s) expirado(s).`);
+      }
+    } catch (err) {
+      console.error('[Scheduler] Error en expiración automática de abonos:', err);
+    }
+  }
+);
+
+/**
+ * Cloud Function v2 Callable: Expiración manual/bajo demanda de abonos mensuales
+ * Permite ejecutar la expiración inmediata de un abono vencido específico o de todos los pendientes.
+ */
+export const expirePendingMonthlyBookingsCallable = onCall(
+  {
+    region: 'us-central1',
+    cors: true,
+  },
+  async (request): Promise<ExpireMonthlyBookingsResponse> => {
+    if (!request.auth || !request.auth.uid) {
+      throw new HttpsError(
+        'unauthenticated',
+        'Debe estar autenticado en MusicKids para ejecutar este servicio.'
+      );
+    }
+
+    const data = (request.data || {}) as ExpireMonthlyBookingsPayload;
+    try {
+      return await expireMonthlyBookingsBatch(db, data.bookingId);
+    } catch (err: any) {
+      console.error('Error al ejecutar expirePendingMonthlyBookingsCallable:', err);
+      throw new HttpsError('internal', err?.message || 'Error al procesar la expiración del abono.');
+    }
+  }
+);
+

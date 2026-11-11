@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Home,
   Calendar,
@@ -45,6 +45,48 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
   const [unreadSupportCount, setUnreadSupportCount] = useState<number>(0);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
+  const [showExpiredLessonsHistory, setShowExpiredLessonsHistory] = useState(false);
+
+  // Clases activas para "Tus próximas clases": excluye canceladas, expiradas y de abonos no confirmados > 24h
+  const activeLessons = useMemo(() => {
+    return lessons.filter((lesson) => {
+      if (lesson.status === 'cancelled' || lesson.status === 'expired') return false;
+      if ((lesson as any).paymentStatus === 'expired') return false;
+      if (
+        (lesson as any).paymentStatus === 'pending_confirmation' &&
+        (lesson as any).monthlyBookingId
+      ) {
+        const exp = (lesson as any).expiresAt;
+        const expTime = exp?.toDate
+          ? exp.toDate().getTime()
+          : exp
+          ? new Date(exp).getTime()
+          : 0;
+        if (expTime > 0 && expTime <= Date.now()) return false;
+      }
+      return true;
+    });
+  }, [lessons]);
+
+  // Historial de clases con reserva vencida / expirada por falta de confirmación de pago
+  const expiredLessons = useMemo(() => {
+    return lessons.filter((lesson) => {
+      if (lesson.status === 'expired' || (lesson as any).paymentStatus === 'expired') return true;
+      if (
+        (lesson as any).paymentStatus === 'pending_confirmation' &&
+        (lesson as any).monthlyBookingId
+      ) {
+        const exp = (lesson as any).expiresAt;
+        const expTime = exp?.toDate
+          ? exp.toDate().getTime()
+          : exp
+          ? new Date(exp).getTime()
+          : 0;
+        if (expTime > 0 && expTime <= Date.now()) return true;
+      }
+      return false;
+    });
+  }, [lessons]);
 
   const loadStudentLessons = async () => {
     if (!user?.uid) return;
@@ -452,7 +494,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
                 Reintentar
               </button>
             </div>
-          ) : lessons.length === 0 ? (
+          ) : activeLessons.length === 0 ? (
             <div className="bg-white rounded-[24px] p-10 sm:p-14 border border-slate-100 text-center flex flex-col items-center justify-center shadow-xs">
               <div className="w-16 h-16 rounded-2xl bg-[#DDF1F8] text-[#00537A] flex items-center justify-center mb-4">
                 <Music className="w-8 h-8" />
@@ -472,7 +514,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
             </div>
           ) : (
             <div className="space-y-4">
-              {lessons.map((lesson) => (
+              {activeLessons.map((lesson) => (
                 <div
                   key={lesson.id}
                   id={`lesson-card-${lesson.id}`}
@@ -570,6 +612,58 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* HISTORIAL DE RESERVAS EXPIRADAS / VENCIDAS (Si existen) */}
+          {expiredLessons.length > 0 && (
+            <div className="bg-slate-50 border border-slate-200/80 rounded-[20px] p-4 sm:p-5 mt-2">
+              <button
+                type="button"
+                onClick={() => setShowExpiredLessonsHistory((prev) => !prev)}
+                className="w-full flex items-center justify-between text-left cursor-pointer group"
+              >
+                <div className="flex items-center gap-2.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+                  <span className="text-xs sm:text-sm font-semibold text-slate-700 group-hover:text-slate-900">
+                    Historial de reservas vencidas ({expiredLessons.length})
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 text-xs text-slate-500 font-medium">
+                  <span>{showExpiredLessonsHistory ? 'Ocultar' : 'Mostrar'}</span>
+                  <ChevronDown
+                    className={`w-4 h-4 transition-transform duration-200 ${
+                      showExpiredLessonsHistory ? 'rotate-180' : ''
+                    }`}
+                  />
+                </div>
+              </button>
+
+              {showExpiredLessonsHistory && (
+                <div className="mt-4 pt-3 border-t border-slate-200 space-y-2.5">
+                  <p className="text-xs text-slate-500 leading-relaxed mb-3">
+                    Estas clases pertenecían a reservas de abonos que no recibieron confirmación de pago dentro del plazo de 24 horas y fueron liberadas para otros alumnos.
+                  </p>
+                  {expiredLessons.map((expired) => (
+                    <div
+                      key={expired.id}
+                      className="bg-white/80 rounded-xl p-3 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-600"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 font-medium text-[11px] border border-amber-200">
+                          Reserva vencida (24h)
+                        </span>
+                        <span className="font-semibold text-slate-800">{expired.title}</span>
+                      </div>
+                      <div className="flex items-center gap-3 text-slate-500 text-[11px]">
+                        <span>Profesor/a: {expired.teacherName || 'Profesor'}</span>
+                        <span>•</span>
+                        <span>{formatLessonDateTime(expired.date)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

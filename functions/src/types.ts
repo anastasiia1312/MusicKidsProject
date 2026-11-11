@@ -117,4 +117,14 @@ export interface CreateManualLessonResponse {
   meetUrl: string; // Enlace oficial verificado de Google Meet
   meetSpaceName: string | null;
   message: string;
+}export interface ExpireMonthlyBookingsPayload {
+  bookingId?: string;
+}
+
+export interface ExpireMonthlyBookingsResponse {
+  success: boolean;
+  totalChecked: number;
+  expiredCount: number;
+  expiredBookingIds: string[];
+  message: string;
 }

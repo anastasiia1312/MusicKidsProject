@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Plus,
   Music,
@@ -180,6 +180,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
   const [isConfirming, setIsConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [confirmSuccessMessage, setConfirmSuccessMessage] = useState<string | null>(null);
+  const [showExpiredBookingsHistory, setShowExpiredBookingsHistory] = useState(false);
 
   const loadData = async () => {
     if (!user?.uid) return;
@@ -224,10 +225,49 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
     loadData();
   }, [user?.uid]);
 
-  // Filtrar abonos pendientes de confirmación
-  const pendingBookings = monthlyBookings.filter(
-    (b) => b.status === 'pending_payment_confirmation' || b.status === 'pending_payment'
-  );
+  // Filtrar abonos pendientes de confirmación (SOLO aquellos vigentes dentro del plazo de 24 horas)
+  const pendingBookings = useMemo(() => {
+    return monthlyBookings.filter((b) => {
+      if (b.status !== 'pending_payment_confirmation' && b.status !== 'pending_payment') {
+        return false;
+      }
+      const expInfo = getBookingExpirationInfo(b);
+      return !expInfo.isExpired;
+    });
+  }, [monthlyBookings]);
+
+  // Historial de abonos con plazo de 24 horas vencido / expirado
+  const expiredBookings = useMemo(() => {
+    return monthlyBookings.filter((b) => {
+      if (b.status === 'expired') return true;
+      if (b.status === 'pending_payment_confirmation' || b.status === 'pending_payment') {
+        const expInfo = getBookingExpirationInfo(b);
+        return expInfo.isExpired;
+      }
+      return false;
+    });
+  }, [monthlyBookings]);
+
+  // Clases activas para "Tus próximas clases": excluye clases canceladas o de abonos expirados
+  const activeLessons = useMemo(() => {
+    return lessons.filter((lesson) => {
+      if (lesson.status === 'cancelled' || lesson.status === 'expired') return false;
+      if ((lesson as any).paymentStatus === 'expired') return false;
+      if (
+        (lesson as any).paymentStatus === 'pending_confirmation' &&
+        (lesson as any).monthlyBookingId
+      ) {
+        const exp = (lesson as any).expiresAt;
+        const expTime = exp?.toDate
+          ? exp.toDate().getTime()
+          : exp
+          ? new Date(exp).getTime()
+          : 0;
+        if (expTime > 0 && expTime <= Date.now()) return false;
+      }
+      return true;
+    });
+  }, [lessons]);
 
   return (
     <TeacherLayout activeSection="dashboard" onNavigate={onNavigate} onRefreshData={loadData}>
@@ -426,6 +466,68 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
             })}
           </div>
         )}
+
+        {/* HISTORIAL DE ABONOS CON PLAZO VENCIDO (Liberados automáticamente) */}
+        {expiredBookings.length > 0 && (
+          <div className="mt-3 bg-slate-50/80 border border-slate-200/90 rounded-[20px] p-4 sm:p-5">
+            <button
+              type="button"
+              onClick={() => setShowExpiredBookingsHistory((prev) => !prev)}
+              className="w-full flex items-center justify-between text-left text-xs font-bold text-slate-700 hover:text-slate-900 transition-colors cursor-pointer"
+            >
+              <div className="flex items-center gap-2 flex-wrap">
+                <Clock className="w-4 h-4 text-slate-400" />
+                <span>Historial de abonos con plazo vencido ({expiredBookings.length})</span>
+                <span className="text-[11px] text-slate-400 font-normal hidden sm:inline">
+                  — Horarios liberados automáticamente para nuevas reservas
+                </span>
+              </div>
+              <span className="text-xs text-[#00537A] font-extrabold shrink-0 ml-2">
+                {showExpiredBookingsHistory ? 'Ocultar historial' : 'Ver historial'}
+              </span>
+            </button>
+
+            {showExpiredBookingsHistory && (
+              <div className="mt-3.5 space-y-2.5 pt-3.5 border-t border-slate-200/70 animate-in fade-in duration-200">
+                {expiredBookings.map((b) => {
+                  const studentName =
+                    b.studentName ||
+                    students.find((s) => s.uid === b.studentId)?.name ||
+                    'Alumno';
+                  const schedules = getDistinctSchedulesSummary(b);
+                  const totalAmount = (b.totalPrice || b.price || 0).toLocaleString('es-AR');
+
+                  return (
+                    <div
+                      key={b.id}
+                      className="bg-white rounded-xl p-3.5 sm:p-4 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-extrabold text-slate-800">{b.month}</span>
+                          <span className="text-slate-400">•</span>
+                          <span className="font-semibold text-slate-700">{studentName}</span>
+                          <span className="px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold">
+                            Plazo de 24h vencido
+                          </span>
+                        </div>
+                        <p className="text-slate-500 text-[11px]">
+                          {schedules} ({b.totalLessons} clases) — Los horarios ya están libres para otros alumnos.
+                        </p>
+                      </div>
+                      <div className="text-left sm:text-right shrink-0">
+                        <span className="font-extrabold text-slate-600 block">
+                          $ {totalAmount} {b.currency || 'ARS'}
+                        </span>
+                        <span className="text-[10px] text-slate-400">Transferencia no confirmada</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* SECCIÓN 2: TUS PRÓXIMAS CLASES */}
@@ -462,7 +564,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
               Reintentar
             </button>
           </div>
-        ) : lessons.length === 0 ? (
+        ) : activeLessons.length === 0 ? (
           <div className="bg-white rounded-[24px] p-10 sm:p-14 border border-slate-100 text-center flex flex-col items-center justify-center shadow-xs">
             <div className="w-16 h-16 rounded-2xl bg-[#DDF1F8] text-[#00537A] flex items-center justify-center mb-4">
               <Music className="w-8 h-8" />
@@ -491,7 +593,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
           </div>
         ) : (
           <div className="space-y-4">
-            {lessons.map((lesson) => {
+            {activeLessons.map((lesson) => {
               const isPendingPayment = (lesson as any).paymentStatus === 'pending_confirmation';
               const isConfirmedPayment = (lesson as any).paymentStatus === 'confirmed';
 

@@ -836,7 +836,13 @@ export const TeacherAvailability: React.FC<TeacherAvailabilityProps> = ({ onNavi
       // Las clases reservadas se muestran SIEMPRE, incluso si el día está bloqueado o en vacaciones
       if (leg.status === 'booked') {
         const matchingLegacyLesson = teacherLessons.find((lesson) => {
-          if (lesson.status === 'cancelled') return false;
+          if (lesson.status === 'cancelled' || lesson.status === 'expired') return false;
+          if ((lesson as any).paymentStatus === 'expired') return false;
+          if ((lesson as any).paymentStatus === 'pending_confirmation' && (lesson as any).monthlyBookingId) {
+            const exp = (lesson as any).expiresAt;
+            const expTime = exp?.toDate ? exp.toDate().getTime() : exp ? new Date(exp).getTime() : 0;
+            if (expTime > 0 && expTime <= Date.now()) return false;
+          }
           if (leg.lessonId && lesson.id === leg.lessonId) return true;
           if (!lesson.date) return false;
           const lDate = lesson.date?.toDate ? lesson.date.toDate() : new Date(lesson.date as any);
@@ -898,7 +904,13 @@ export const TeacherAvailability: React.FC<TeacherAvailabilityProps> = ({ onNavi
 
       // Comprobar si coincide con una clase reservada en esta fecha específica
       const overlappingLesson = teacherLessons.find((lesson) => {
-        if (lesson.status === 'cancelled') return false;
+        if (lesson.status === 'cancelled' || lesson.status === 'expired') return false;
+        if ((lesson as any).paymentStatus === 'expired') return false;
+        if ((lesson as any).paymentStatus === 'pending_confirmation' && (lesson as any).monthlyBookingId) {
+          const exp = (lesson as any).expiresAt;
+          const expTime = exp?.toDate ? exp.toDate().getTime() : exp ? new Date(exp).getTime() : 0;
+          if (expTime > 0 && expTime <= Date.now()) return false;
+        }
         if (!lesson.date) return false;
 
         const lDate = lesson.date?.toDate ? lesson.date.toDate() : new Date(lesson.date as any);
