@@ -24,37 +24,54 @@ export const Login: React.FC<LoginProps> = ({ onNavigate }) => {
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Evitar múltiples envíos mientras se procesa
+    if (isSubmitting || isGoogleSubmitting) {
+      return;
+    }
+
     setErrorMessage(null);
 
-    if (!email.trim()) {
-      setErrorMessage('Ingresá tu email.');
+    const trimmedEmail = email.trim();
+
+    // Validación de campos vacíos sin intentar autenticar con Firebase
+    if (!trimmedEmail && !password) {
+      setErrorMessage('Por favor, ingresá tu correo electrónico y contraseña.');
+      return;
+    }
+
+    if (!trimmedEmail) {
+      setErrorMessage('Por favor, ingresá tu correo electrónico.');
       return;
     }
 
     if (!password) {
-      setErrorMessage('Ingresá tu contraseña.');
+      setErrorMessage('Por favor, ingresá tu contraseña.');
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      const profile = await loginWithEmail(email, password);
+      const profile = await loginWithEmail(trimmedEmail, password);
       if (!profile) {
         onNavigate('/select-role');
       } else if (profile.role === 'teacher') {
         onNavigate('/teacher/dashboard');
       } else if (profile.role === 'student') {
         onNavigate('/student/dashboard');
+      } else if (profile.role === 'admin') {
+        onNavigate('/admin/dashboard');
       } else {
         onNavigate('/select-role');
       }
     } catch (err: any) {
       console.error('Error al iniciar sesión con email:', err);
       const msg = getAuthErrorMessage(err);
-      if (msg) {
-        setErrorMessage(msg);
-      }
+      setErrorMessage(
+        msg ||
+          'El correo electrónico o la contraseña son incorrectos. Verificá tus datos e intentá nuevamente.'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -214,17 +231,6 @@ export const Login: React.FC<LoginProps> = ({ onNavigate }) => {
               </p>
             </div>
 
-            {/* Mensaje de Error si ocurre */}
-            {errorMessage && (
-              <div
-                id="login-error-alert"
-                className="mb-5 p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-3 text-rose-700 text-sm"
-              >
-                <AlertCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
-                <span className="leading-snug">{errorMessage}</span>
-              </div>
-            )}
-
             <form id="login-form" onSubmit={handleEmailLogin} className="space-y-4">
               {/* Campo Correo Electrónico */}
               <div>
@@ -299,6 +305,18 @@ export const Login: React.FC<LoginProps> = ({ onNavigate }) => {
                 </button>
               </div>
             </form>
+
+            {/* Mensaje de Error claro y visible debajo del formulario */}
+            {errorMessage && (
+              <div
+                id="login-error-alert"
+                className="mt-4 p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-3 text-rose-700 text-sm animate-in fade-in duration-200"
+                role="alert"
+              >
+                <AlertCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
+                <span className="leading-snug font-medium">{errorMessage}</span>
+              </div>
+            )}
 
             {/* Separador "o" */}
             <div className="my-4 flex items-center">

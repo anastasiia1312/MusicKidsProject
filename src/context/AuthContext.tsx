@@ -174,23 +174,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     email: string,
     pass: string
   ): Promise<UserProfile | null> => {
-    setLoading(true);
-    try {
-      const { user: loggedUser, profile } = await loginWithEmailService(email, pass);
-      setUser(loggedUser);
-      if (profile) {
-        setUserProfile(profile);
-        setRole(profile.role);
-        setPendingGoogleUser(null);
-      } else {
-        setUserProfile(null);
-        setRole(null);
-        setPendingGoogleUser(loggedUser);
-      }
-      return profile;
-    } finally {
-      setLoading(false);
+    const { user: loggedUser, profile } = await loginWithEmailService(email, pass);
+    setUser(loggedUser);
+    if (profile) {
+      setUserProfile(profile);
+      setRole(profile.role);
+      setPendingGoogleUser(null);
+    } else {
+      setUserProfile(null);
+      setRole(null);
+      setPendingGoogleUser(loggedUser);
     }
+    return profile;
   };
 
   const loginWithGoogle = async (): Promise<{

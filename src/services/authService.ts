@@ -89,13 +89,13 @@ export const getAuthErrorMessage = (error: any): string => {
     case 'auth/invalid-credential':
     case 'auth/wrong-password':
     case 'auth/user-not-found':
-      return 'El email o la contraseña son incorrectos.';
+      return 'El correo electrónico o la contraseña son incorrectos. Verificá tus datos e intentá nuevamente.';
 
     case 'auth/email-already-in-use':
-      return 'Ya existe una cuenta registrada con este email. Podés iniciar sesión.';
+      return 'Ya existe una cuenta registrada con este correo electrónico. Podés iniciar sesión.';
 
     case 'auth/invalid-email':
-      return 'Ingresá un email válido.';
+      return 'Ingresá un correo electrónico válido.';
 
     case 'auth/weak-password':
       return 'La contraseña es demasiado débil. Utilizá al menos 6 caracteres.';
