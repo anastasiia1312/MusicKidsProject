@@ -348,9 +348,7 @@ export const AdminSupportPage: React.FC<AdminSupportPageProps> = ({ onNavigate }
             <h1 className="text-2xl sm:text-3xl font-extrabold text-[#00537A] tracking-tight">
               Gestión de Solicitudes de Asistencia
             </h1>
-            <p className="text-sm text-slate-500">
-              Respondé tickets, modificá estados y brindá asistencia técnica directa a alumnos y profesores.
-            </p>
+           
           </div>
 
           <button
@@ -374,7 +372,7 @@ export const AdminSupportPage: React.FC<AdminSupportPageProps> = ({ onNavigate }
             <div className="text-3xl sm:text-4xl font-extrabold text-slate-900">
               {stats.total}
             </div>
-            <p className="text-[11px] text-slate-400 mt-1">Registradas históricamente</p>
+          
           </div>
 
           <div className="bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-slate-100">
@@ -384,7 +382,7 @@ export const AdminSupportPage: React.FC<AdminSupportPageProps> = ({ onNavigate }
             <div className="text-3xl sm:text-4xl font-extrabold text-amber-700">
               {stats.pending}
             </div>
-            <p className="text-[11px] text-slate-400 mt-1">Requieren atención inicial</p>
+           
           </div>
 
           <div className="bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-slate-100">
@@ -394,7 +392,7 @@ export const AdminSupportPage: React.FC<AdminSupportPageProps> = ({ onNavigate }
             <div className="text-3xl sm:text-4xl font-extrabold text-sky-700">
               {stats.inProgress}
             </div>
-            <p className="text-[11px] text-slate-400 mt-1">En curso de resolución</p>
+         
           </div>
 
           <div className="bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-slate-100">
@@ -404,7 +402,7 @@ export const AdminSupportPage: React.FC<AdminSupportPageProps> = ({ onNavigate }
             <div className="text-3xl sm:text-4xl font-extrabold text-emerald-700">
               {stats.resolved}
             </div>
-            <p className="text-[11px] text-slate-400 mt-1">Solucionadas con éxito</p>
+           
           </div>
         </section>
 
@@ -709,9 +707,7 @@ export const AdminSupportPage: React.FC<AdminSupportPageProps> = ({ onNavigate }
                 )}
 
                 {!loadingMessages && messages.length === 0 && (
-                  <div className="text-center py-6 text-slate-400 text-xs italic bg-slate-50/50 rounded-2xl border border-slate-100">
-                    Aún no hay respuestas en este ticket. Podés responderle directamente al usuario abajo.
-                  </div>
+                 
                 )}
 
                 {messages.map((m) => {
