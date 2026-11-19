@@ -1470,9 +1470,7 @@ export const TeacherAvailability: React.FC<TeacherAvailabilityProps> = ({ onNavi
                 <Repeat className="w-4 h-4 shrink-0 mt-0.5 text-sky-700" />
                 <div className="space-y-0.5 leading-relaxed">
                   <span className="font-bold block">Horario semanal permanente</span>
-                  <span className="text-slate-600 block">
-                    Este horario se proyectará semana a semana de forma automática. Permite que los alumnos reserven clases semanales fijas.
-                  </span>
+                  
                 </div>
               </div>
 
