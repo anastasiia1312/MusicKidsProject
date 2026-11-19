@@ -56,14 +56,44 @@ export const StudentLayout: React.FC<StudentLayoutProps> = ({
     >
       {/* Elementos ambientales decorativos de fondo (identidad MusicKids) */}
       <div className="absolute inset-0 pointer-events-none select-none overflow-hidden z-0">
-        <div className="absolute -top-24 -right-24 w-96 h-96 bg-[#D7E6F1]/50 rounded-full blur-3xl" />
-        <div className="absolute -bottom-24 -left-24 w-80 h-80 sm:w-96 sm:h-96 bg-[#FFE29A]/30 rounded-full blur-3xl" />
+        {/* Mancha azulada suave arriba a la derecha */}
+        <div className="absolute -top-24 -right-24 w-96 h-96 bg-[#D7E6F1]/50 rounded-full blur-3xl pointer-events-none" />
+
+        {/* Mancha amarilla suave abajo a la izquierda */}
+        <div className="absolute -bottom-24 -left-24 w-80 h-80 sm:w-96 sm:h-96 bg-[#FFE29A]/30 rounded-full blur-3xl pointer-events-none" />
+
+        {/* Curvas decorativas amarillas en el fondo inferior izquierdo */}
+        <svg
+          className="absolute bottom-0 left-0 w-80 h-80 sm:w-96 sm:h-96 opacity-75 pointer-events-none"
+          viewBox="0 0 400 400"
+          fill="none"
+        >
+          <path
+            d="M -50 350 C 50 380, 100 300, 120 280 C 160 240, 80 180, 110 140 C 130 110, 180 130, 210 90"
+            stroke="#FAB816"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+          />
+        </svg>
+
+        <svg
+          className="absolute top-1/4 right-0 w-64 h-80 opacity-60 pointer-events-none"
+          viewBox="0 0 300 400"
+          fill="none"
+        >
+          <path
+            d="M 280 50 C 220 80, 180 150, 190 220 C 200 290, 270 320, 240 380"
+            stroke="#FAB816"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+          />
+        </svg>
       </div>
 
       {/* HEADER SUPERIOR */}
       <header
         id="student-dashboard-header"
-        className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-4 flex items-center justify-between relative z-20"
+        className="w-full max-w-[1680px] mx-auto px-4 sm:px-5 lg:px-6 pt-5 pb-3 flex items-center justify-between relative z-20"
       >
         {/* Bloque Izquierdo: Logotipo MusicKids + Menú + Saludo */}
         <div className="flex items-center gap-3 sm:gap-6">
@@ -146,45 +176,54 @@ export const StudentLayout: React.FC<StudentLayoutProps> = ({
             </button>
 
             {profileDropdownOpen && (
-              <div
-                id="student-profile-dropdown"
-                className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-lg border border-slate-100 py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
-              >
-                <div className="px-4 py-2 border-b border-slate-100">
-                  <p className="text-xs text-slate-500 font-medium">Conectado como</p>
-                  <p className="text-sm font-bold text-slate-900 truncate">
-                    {userProfile?.name || 'Alumno'}
-                  </p>
-                  <p className="text-xs text-slate-500 truncate">{user?.email}</p>
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setProfileDropdownOpen(false)}
+                />
+                <div
+                  id="student-profile-dropdown"
+                  className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-lg border border-slate-100 py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
+                >
+                  <div className="px-4 py-2 border-b border-slate-100">
+                    <p className="text-xs text-slate-500 font-medium">Conectado como</p>
+                    <p className="text-sm font-bold text-slate-900 truncate">
+                      {userProfile?.name || 'Alumno'}
+                    </p>
+                    <p className="text-xs text-slate-500 truncate">{user?.email}</p>
+                  </div>
+                  <button
+                    type="button"
+                    id="dropdown-student-profile-link"
+                    onClick={() => {
+                      setProfileDropdownOpen(false);
+                      onNavigate('/student/profile');
+                    }}
+                    className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
+                  >
+                    <User className="w-3.5 h-3.5 text-slate-400" />
+                    Mi perfil
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProfileDropdownOpen(false);
+                      handleLogout();
+                    }}
+                    className="w-full px-4 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50 flex items-center gap-2 cursor-pointer"
+                  >
+                    <LogOut className="w-3.5 h-3.5 text-rose-500" />
+                    Cerrar sesión
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  id="dropdown-student-profile-link"
-                  onClick={() => {
-                    setProfileDropdownOpen(false);
-                    onNavigate('/student/profile');
-                  }}
-                  className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
-                >
-                  <User className="w-3.5 h-3.5 text-slate-400" />
-                  Mi perfil
-                </button>
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  className="w-full px-4 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50 flex items-center gap-2 cursor-pointer"
-                >
-                  <LogOut className="w-3.5 h-3.5 text-rose-500" />
-                  Cerrar sesión
-                </button>
-              </div>
+              </>
             )}
           </div>
         </div>
       </header>
 
       {/* CONTENIDO PRINCIPAL (SIDEBAR + CONTENIDO DE PÁGINA) */}
-      <div className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 relative z-10 flex flex-col lg:flex-row gap-6 items-start">
+      <div className="flex-1 w-full max-w-[1680px] mx-auto px-4 sm:px-5 lg:px-6 py-4 sm:py-5 relative z-10 flex flex-col lg:flex-row gap-4 lg:gap-5 items-start">
         {/* SIDEBAR DEL ALUMNO */}
         <aside
           id="student-sidebar"
@@ -314,8 +353,13 @@ export const StudentLayout: React.FC<StudentLayoutProps> = ({
         </aside>
 
         {/* CONTENIDO CENTRAL */}
-        <main className="flex-1 w-full min-w-0">{children}</main>
+        <main className="flex-1 min-w-0 w-full flex flex-col gap-6 transition-all duration-200 ease-in-out">
+          {children}
+        </main>
       </div>
+
+      {/* Espaciado inferior de balance */}
+      <footer className="w-full py-4 shrink-0" />
     </div>
   );
 };

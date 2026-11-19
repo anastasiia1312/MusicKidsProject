@@ -169,7 +169,7 @@ export const StudentTasksPage: React.FC<StudentTasksPageProps> = ({ onNavigate }
 
   return (
     <StudentLayout activeSection="tasks" onNavigate={onNavigate}>
-      <div className="space-y-6 pb-12 max-w-5xl mx-auto w-full">
+      <div className="space-y-6 pb-12 max-w-[1400px] mx-auto w-full">
         {/* ENCABEZADO */}
         <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-sm border border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
           <div className="space-y-1.5">
