@@ -364,9 +364,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                   stats.total
                 )}
               </h3>
-              <p className="text-xs text-slate-400 font-siemreap">
-                Registrados en la plataforma
-              </p>
+             
             </div>
             <div className="w-14 h-14 rounded-2xl bg-[#DDF1F8] text-[#00537A] flex items-center justify-center shrink-0">
               <Users className="w-7 h-7 stroke-[2]" />
@@ -390,9 +388,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                   stats.teachers
                 )}
               </h3>
-              <p className="text-xs text-slate-400 font-siemreap">
-                Docentes de música
-              </p>
+              
             </div>
             <div className="w-14 h-14 rounded-2xl bg-indigo-50 text-indigo-700 flex items-center justify-center shrink-0">
               <GraduationCap className="w-7 h-7 stroke-[2]" />
@@ -416,9 +412,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                   stats.students
                 )}
               </h3>
-              <p className="text-xs text-slate-400 font-siemreap">
-                Estudiantes inscritos
-              </p>
+            
             </div>
             <div className="w-14 h-14 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
               <Music className="w-7 h-7 stroke-[2]" />
