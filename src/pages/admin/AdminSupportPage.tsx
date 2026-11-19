@@ -707,6 +707,10 @@ export const AdminSupportPage: React.FC<AdminSupportPageProps> = ({ onNavigate }
                 )}
 
                 {!loadingMessages && messages.length === 0 && (
+             <div className="text-center py-6 text-slate-400 text-xs italic bg-slate-50/50 rounded-2xl border border-slate-100">
+                    Aún no hay respuestas en este ticket. Podés responderle directamente al usuario abajo.
+                  </div>
+            
                  
                 )}
 
