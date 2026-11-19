@@ -1293,9 +1293,7 @@ export const TeacherAvailability: React.FC<TeacherAvailabilityProps> = ({ onNavi
               >
                 <Calendar className="w-6 h-6 text-slate-400 shrink-0" />
                 <span className="font-semibold text-slate-700">No hay horarios disponibles configurados para esta semana.</span>
-                <span className="text-xs text-slate-500 max-w-sm">
-                  Añadí un nuevo horario desde el formulario lateral. Podés elegir que se repita todas las semanas de forma automática.
-                </span>
+                
               </div>
             )}
 
