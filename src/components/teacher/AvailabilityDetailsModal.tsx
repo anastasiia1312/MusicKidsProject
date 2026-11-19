@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import type { DisplayCalendarSlot } from '../../pages/teacher/TeacherAvailability';
 import { calculateEndTime } from '../../services/recurringScheduleService';
+import { canJoinLessonMeet, isValidMeetUrl } from '../../utils/meetValidation';
 
 interface AvailabilityDetailsModalProps {
   slot: DisplayCalendarSlot | null;
@@ -299,14 +300,15 @@ export const AvailabilityDetailsModal: React.FC<AvailabilityDetailsModalProps> =
               )}
 
               {/* Enlace oficial de Google Meet vinculado a la clase */}
-              {slot.meetUrl ? (
+              {(slot.bookedLesson ? canJoinLessonMeet(slot.bookedLesson) : isValidMeetUrl(slot.meetUrl)) &&
+              isValidMeetUrl(slot.bookedLesson?.meetUrl || slot.meetUrl) ? (
                 <div className="pt-2 border-t border-indigo-100 flex flex-col gap-2">
                   <div className="flex items-center gap-1.5 text-[#00537A] font-bold">
                     <Video className="w-4 h-4 text-[#00537A]" />
                     <span>Videollamada de Google Meet vinculada</span>
                   </div>
                   <a
-                    href={slot.meetUrl}
+                    href={(slot.bookedLesson?.meetUrl || slot.meetUrl)!.trim()}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-[#00537A] hover:bg-[#004160] text-white shadow-2xs transition-colors cursor-pointer"
@@ -317,7 +319,9 @@ export const AvailabilityDetailsModal: React.FC<AvailabilityDetailsModalProps> =
                 </div>
               ) : (
                 <p className="text-[11px] text-slate-500 italic pt-1">
-                  No hay enlace de Google Meet registrado para esta clase.
+                  {(slot.bookedLesson as any)?.paymentStatus === 'pending_confirmation'
+                    ? 'Google Meet se habilitará cuando confirmes la recepción del pago del abono.'
+                    : 'No hay enlace de Google Meet asignado para esta clase confirmada.'}
                 </p>
               )}
             </div>

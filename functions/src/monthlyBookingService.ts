@@ -3,6 +3,7 @@
  * SUBBLOQUE 6B.3.3: Creación atómica de reservas mensuales
  */
 
+import { randomUUID } from 'crypto';
 import * as admin from 'firebase-admin';
 import { HttpsError } from 'firebase-functions/v2/https';
 import type {
@@ -15,6 +16,8 @@ import type {
   GetTeacherPublicAvailabilityResponse,
   SanitizedOccupiedInterval,
   ExpireMonthlyBookingsResponse,
+  ProvisionMonthlyBookingMeetPayload,
+  ProvisionMonthlyBookingMeetResponse,
 } from './types';
 
 const MONTH_NAMES_SPANISH = [
@@ -670,22 +673,30 @@ export async function createMonthlyBookingTransaction(
   });
 }
 
+const MEET_URL_REGEX =
+  /^https:\/\/meet\.google\.com\/[a-zA-Z0-9]{2,}(?:-[a-zA-Z0-9]+)+(?:\?[^#\s]*)?(?:#[^\s]*)?$/;
+
 /**
  * Valida si una URL de Google Meet tiene un formato estructural válido.
  */
-function isValidMeetUrl(url: any): boolean {
+export function isValidMeetUrl(url: any): boolean {
   if (typeof url !== 'string') return false;
   const trimmed = url.trim();
-  return trimmed.startsWith('https://meet.google.com/') && trimmed.length > 24;
+  return MEET_URL_REGEX.test(trimmed);
 }
 
 /**
  * SUBBLOQUE 6B.5: Confirmación de pago del abono mensual por el profesor
  * Realiza la transición atómica:
  * - monthlyBookings: 'pending_payment_confirmation' -> 'confirmed'
- * - lessons: paymentStatus 'pending_confirmation' -> 'confirmed', vinculando Google Meet permanente
+ * - lessons: paymentStatus 'pending_confirmation' -> 'confirmed'
  * - teacherDailySchedule: intervalos 'pending_payment_confirmation' -> 'confirmed' (sin expiresAt)
  * - teacherSlotLocks: expiresAt -> null
+ *
+ * Etapa 2 Google Meet: La confirmación del pago NO consulta ni copia salas permanentes
+ * heredadas (ni privateSettings/meetConfig ni users/{teacherId}). Cada abono confirmado
+ * provisiona su propia sala única de Google Meet en una operación separada mediante
+ * `provisionMonthlyBookingMeetService`.
  */
 export async function confirmMonthlyBookingPaymentTransaction(
   db: admin.firestore.Firestore,
@@ -699,24 +710,6 @@ export async function confirmMonthlyBookingPaymentTransaction(
 
   const { now: nowServer } = getBuenosAiresNow();
   const bookingRef = db.doc(`monthlyBookings/${bookingId.trim()}`);
-
-  // Consultar configuración de Google Meet del profesor
-  let resolvedMeetUrl: string | null = null;
-  let resolvedMeetSpaceName: string | null = null;
-  try {
-    const meetConfigSnap = await db
-      .doc(`users/${authenticatedTeacherId}/privateSettings/meetConfig`)
-      .get();
-    if (meetConfigSnap.exists) {
-      const md = meetConfigSnap.data();
-      if (md && isValidMeetUrl(md.permanentMeetUrl)) {
-        resolvedMeetUrl = md.permanentMeetUrl;
-        resolvedMeetSpaceName = md.permanentMeetSpaceName || null;
-      }
-    }
-  } catch (err) {
-    console.warn('Advertencia al consultar meetConfig para confirmación:', err);
-  }
 
   // Consultar lecciones vinculadas por bookingId para asegurar consistencia
   let linkedLessonsSnap: admin.firestore.QuerySnapshot | null = null;
@@ -862,16 +855,12 @@ export async function confirmMonthlyBookingPaymentTransaction(
     // ==========================================
     // 2. TODAS LAS ESCRITURAS (WRITES) DESPUÉS
     // ==========================================
-    transaction.set(
-      bookingRef,
-      {
-        ...bookingData,
-        status: 'confirmed',
-        confirmedAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
+    const bookingUpdates: any = {
+      status: 'confirmed',
+      confirmedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    transaction.set(bookingRef, bookingUpdates, { merge: true });
 
     const lessonIds: string[] = Array.from(
       new Set([
@@ -882,17 +871,12 @@ export async function confirmMonthlyBookingPaymentTransaction(
 
     for (const lid of lessonIds) {
       const lRef = db.doc(`lessons/${lid}`);
-      transaction.set(
-        lRef,
-        {
-          paymentStatus: 'confirmed',
-          status: 'scheduled',
-          meetUrl: resolvedMeetUrl || null,
-          meetSpaceName: resolvedMeetSpaceName || null,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
+      const lessonUpdates: any = {
+        paymentStatus: 'confirmed',
+        status: 'scheduled',
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+      transaction.set(lRef, lessonUpdates, { merge: true });
     }
 
     for (const dStr of uniqueDates) {
@@ -942,6 +926,504 @@ export async function confirmMonthlyBookingPaymentTransaction(
         'Pago confirmado exitosamente. Los horarios han quedado reservados definitivamente y las clases se encuentran habilitadas.',
     };
   });
+}
+
+export interface MeetSpaceCreationResult {
+  meetUrl: string;
+  meetSpaceName: string;
+}
+
+export class MeetApiCallError extends Error {
+  public readonly classification: 'definitive_failure' | 'uncertain';
+  public readonly httpStatus?: number;
+
+  constructor(
+    message: string,
+    classification: 'definitive_failure' | 'uncertain',
+    httpStatus?: number
+  ) {
+    super(message);
+    this.name = 'MeetApiCallError';
+    this.classification = classification;
+    this.httpStatus = httpStatus;
+  }
+}
+
+export interface ProvisionMonthlyBookingMeetDeps {
+  createMeetSpaceFn?: (accessToken: string) => Promise<MeetSpaceCreationResult>;
+  nowMsFn?: () => number;
+  lockTtlMs?: number;
+}
+
+const DEFAULT_MEET_LOCK_TTL_MS = 60 * 1000;
+const MEET_API_TIMEOUT_MS = 15 * 1000;
+
+/**
+ * Invoca Google Meet REST API v2 para crear un espacio nuevo (OUTSIDE Firestore transaction).
+ * Distingue fallos determinísticos previos (4xx/429) de respuestas inciertas (timeout, red, 5xx, JSON inválido).
+ */
+export async function createGoogleMeetSpaceV2(
+  accessToken: string
+): Promise<MeetSpaceCreationResult> {
+  let response: Response;
+  try {
+    response = await fetch('https://meet.googleapis.com/v2/spaces', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+      signal: AbortSignal.timeout(MEET_API_TIMEOUT_MS),
+    });
+  } catch (networkErr: any) {
+    const isTimeout =
+      networkErr?.name === 'AbortError' || networkErr?.name === 'TimeoutError';
+    throw new MeetApiCallError(
+      isTimeout
+        ? 'Tiempo de espera agotado al crear la sala en Google Meet API.'
+        : 'Error de red durante la solicitud a Google Meet API.',
+      'uncertain'
+    );
+  }
+
+  if (!response.ok) {
+    const status = response.status;
+    if (status === 400 || status === 401 || status === 403 || status === 404 || status === 429) {
+      throw new MeetApiCallError(
+        `Google Meet API rechazó la solicitud (HTTP ${status}).`,
+        'definitive_failure',
+        status
+      );
+    }
+    throw new MeetApiCallError(
+      `Google Meet API respondió con error de servidor incierto (HTTP ${status}).`,
+      'uncertain',
+      status
+    );
+  }
+
+  let data: any;
+  try {
+    data = await response.json();
+  } catch {
+    throw new MeetApiCallError(
+      'La respuesta de Google Meet API no pudo parsearse como JSON válido.',
+      'uncertain',
+      response.status
+    );
+  }
+
+  const meetingUri = typeof data?.meetingUri === 'string' ? data.meetingUri.trim() : '';
+  const spaceName = typeof data?.name === 'string' ? data.name.trim() : '';
+
+  if (!isValidMeetUrl(meetingUri)) {
+    throw new MeetApiCallError(
+      'La respuesta HTTP 200 de Google Meet API no incluyó una URL de reunión válida.',
+      'uncertain',
+      response.status
+    );
+  }
+
+  return {
+    meetUrl: meetingUri,
+    meetSpaceName: spaceName,
+  };
+}
+
+/**
+ * ETAPA 2 GOOGLE MEET:
+ * Provisión idempotente de sala única de Google Meet para un abono mensual confirmado.
+ *
+ * Garantías arquitectónicas:
+ * 1. Verifica autenticación, pertenencia del profesor, estado 'confirmed' e idempotencia por bookingId.
+ * 2. Protección de concurrencia persistente en Firestore (meetProvisioningStatus + lock con TTL).
+ * 3. NUNCA invoca Google Meet API dentro de una transacción de Firestore.
+ * 4. Si Google Meet API devuelve estado incierto (timeout, red, 5xx, respuesta ambigua),
+ *    persiste meetProvisioningStatus='uncertain' para impedir reintentos automáticos ciegos que creen salas duplicadas.
+ * 5. Escribe meetUrl y meetSpaceName únicamente en monthlyBookings/{bookingId} y sus lessons vinculadas,
+ *    sin alterar pagos, fechas, horarios ni reservas.
+ */
+export async function provisionMonthlyBookingMeetService(
+  db: admin.firestore.Firestore,
+  authenticatedTeacherId: string,
+  payload: ProvisionMonthlyBookingMeetPayload,
+  deps?: ProvisionMonthlyBookingMeetDeps
+): Promise<ProvisionMonthlyBookingMeetResponse> {
+  if (!authenticatedTeacherId || typeof authenticatedTeacherId !== 'string') {
+    throw new HttpsError(
+      'unauthenticated',
+      'Debe iniciar sesión como profesor para provisionar salas de Google Meet.'
+    );
+  }
+
+  const sanitizedBookingId =
+    payload && typeof payload.bookingId === 'string' ? payload.bookingId.trim() : '';
+  if (!sanitizedBookingId) {
+    throw new HttpsError('invalid-argument', 'El identificador del abono es obligatorio.');
+  }
+
+  const cleanToken =
+    payload && typeof payload.meetAccessToken === 'string' ? payload.meetAccessToken.trim() : '';
+  const nowMsFn = deps?.nowMsFn ?? (() => Date.now());
+  const lockTtlMs = deps?.lockTtlMs ?? DEFAULT_MEET_LOCK_TTL_MS;
+  const createMeetSpaceFn = deps?.createMeetSpaceFn ?? createGoogleMeetSpaceV2;
+
+  const bookingRef = db.doc(`monthlyBookings/${sanitizedBookingId}`);
+  const lockOwnerToken = randomUUID();
+
+  // Consultar lecciones vinculadas por query fuera de la transacción de bloqueo
+  const linkedLessonsSnap = await db
+    .collection('lessons')
+    .where('monthlyBookingId', '==', sanitizedBookingId)
+    .get();
+
+  // =========================================================================
+  // TRANSACCIÓN 1: Verificaciones + Idempotencia + Adquisición de Lock
+  // =========================================================================
+  const tx1Result = await db.runTransaction(async (transaction) => {
+    const bookingSnap = await transaction.get(bookingRef);
+    if (!bookingSnap.exists) {
+      throw new HttpsError('not-found', 'El abono mensual indicado no existe.');
+    }
+
+    const bookingData = bookingSnap.data()!;
+    if (bookingData.teacherId !== authenticatedTeacherId) {
+      throw new HttpsError(
+        'permission-denied',
+        'No tiene autorización para gestionar la sala Google Meet de este abono.'
+      );
+    }
+
+    if (bookingData.status !== 'confirmed') {
+      throw new HttpsError(
+        'failed-precondition',
+        'Solo se puede generar una sala de Google Meet para abonos con pago confirmado.'
+      );
+    }
+
+    const lessonIdsFromBooking: string[] = Array.isArray(bookingData.lessonIds)
+      ? bookingData.lessonIds.filter((id: any) => typeof id === 'string' && id.trim() !== '')
+      : [];
+
+    // Idempotencia por bookingId: si el abono ya posee meetUrl válida, no volver a llamar a Google Meet API
+    if (isValidMeetUrl(bookingData.meetUrl)) {
+      return {
+        mode: 'already_provisioned' as const,
+        existingMeetUrl: bookingData.meetUrl.trim(),
+        existingMeetSpaceName:
+          typeof bookingData.meetSpaceName === 'string' && bookingData.meetSpaceName.trim()
+            ? bookingData.meetSpaceName.trim()
+            : null,
+        existingProvisioningStatus: bookingData.meetProvisioningStatus || null,
+        lessonIdsFromBooking,
+      };
+    }
+
+    // Protección ante respuestas inciertas previas: NO reintentar creación ciega de otra sala
+    if (bookingData.meetProvisioningStatus === 'uncertain') {
+      throw new HttpsError(
+        'failed-precondition',
+        'La creación anterior de Google Meet para este abono quedó en estado incierto (posible timeout o error de red). Para evitar salas duplicadas, el reintento automático está bloqueado.'
+      );
+    }
+
+    // Protección de concurrencia persistente
+    const nowMs = nowMsFn();
+    const lockExpMs =
+      typeof bookingData.meetLockExpiresAt === 'number' ? bookingData.meetLockExpiresAt : 0;
+    if (bookingData.meetProvisioningStatus === 'creating' && lockExpMs > nowMs) {
+      throw new HttpsError(
+        'aborted',
+        'Ya hay una solicitud en curso generando la sala de Google Meet para este abono. Esperá unos segundos y verificá nuevamente.'
+      );
+    }
+
+    if (!cleanToken) {
+      throw new HttpsError(
+        'invalid-argument',
+        'Se requiere autorización OAuth de Google Meet (meetAccessToken) para generar la sala.'
+      );
+    }
+
+    transaction.set(
+      bookingRef,
+      {
+        meetProvisioningStatus: 'creating',
+        meetLockOwnerToken: lockOwnerToken,
+        meetLockExpiresAt: nowMs + lockTtlMs,
+        meetProvisioningUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        meetLastError: null,
+      },
+      { merge: true }
+    );
+
+    return {
+      mode: 'create_required' as const,
+      lessonIdsFromBooking,
+    };
+  });
+
+  // =========================================================================
+  // RAMA IDEMPOTENTE: Abono ya tenía meetUrl -> curar lecciones faltantes
+  // =========================================================================
+  if (tx1Result.mode === 'already_provisioned') {
+    const allLessonIds = Array.from(
+      new Set([
+        ...tx1Result.lessonIdsFromBooking,
+        ...linkedLessonsSnap.docs.map((d) => d.id),
+      ])
+    );
+
+    const updatedLessonsCount = await db.runTransaction(async (transaction) => {
+      const bookingSnap = await transaction.get(bookingRef);
+      const lessonRefs = allLessonIds.map((lid) => db.doc(`lessons/${lid}`));
+      const lessonSnaps = await Promise.all(lessonRefs.map((ref) => transaction.get(ref)));
+
+      let healedCount = 0;
+      if (bookingSnap.exists && bookingSnap.data()?.meetProvisioningStatus !== 'ready') {
+        transaction.set(
+          bookingRef,
+          {
+            meetProvisioningStatus: 'ready',
+            meetLockOwnerToken: null,
+            meetLockExpiresAt: null,
+            meetLastError: null,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+
+      for (let i = 0; i < lessonRefs.length; i++) {
+        const lSnap = lessonSnaps[i];
+        if (!lSnap.exists) continue;
+        const lData = lSnap.data()!;
+        if (lData.status === 'cancelled' || lData.status === 'expired') continue;
+
+        const needsUrlSync =
+          lData.meetUrl !== tx1Result.existingMeetUrl ||
+          (tx1Result.existingMeetSpaceName !== null &&
+            lData.meetSpaceName !== tx1Result.existingMeetSpaceName);
+
+        if (needsUrlSync) {
+          transaction.set(
+            lessonRefs[i],
+            {
+              meetUrl: tx1Result.existingMeetUrl,
+              meetSpaceName: tx1Result.existingMeetSpaceName,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+          healedCount++;
+        }
+      }
+
+      return healedCount;
+    });
+
+    return {
+      success: true,
+      bookingId: sanitizedBookingId,
+      meetUrl: tx1Result.existingMeetUrl,
+      meetSpaceName: tx1Result.existingMeetSpaceName,
+      updatedLessonsCount,
+      alreadyProvisioned: true,
+      message:
+        updatedLessonsCount > 0
+          ? 'El abono ya tenía una sala Google Meet asignada; se completó su sincronización en las clases faltantes.'
+          : 'El abono ya cuenta con su sala única de Google Meet asignada.',
+    };
+  }
+
+  // =========================================================================
+  // LLAMADA EXTERNA A GOOGLE MEET REST API v2 (SIEMPRE FUERA DE TRANSACCIÓN)
+  // =========================================================================
+  let createdSpace: MeetSpaceCreationResult;
+  try {
+    createdSpace = await createMeetSpaceFn(cleanToken);
+    if (!createdSpace || !isValidMeetUrl(createdSpace.meetUrl)) {
+      throw new MeetApiCallError(
+        'La creación de Google Meet devolvió una URL inválida o vacía.',
+        'uncertain'
+      );
+    }
+  } catch (apiErr: any) {
+    const classification: 'definitive_failure' | 'uncertain' =
+      apiErr instanceof MeetApiCallError
+        ? apiErr.classification
+        : apiErr?.classification === 'definitive_failure'
+        ? 'definitive_failure'
+        : 'uncertain';
+
+    const httpStatus = apiErr?.httpStatus;
+    const safeErrorMessage = String(apiErr?.message || 'Error al comunicarse con Google Meet API')
+      .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [REDACTED]')
+      .slice(0, 300);
+
+    // Liberar o marcar estado incierto verificando propiedad del lock
+    try {
+      await db.runTransaction(async (transaction) => {
+        const snap = await transaction.get(bookingRef);
+        if (!snap.exists) return;
+        const data = snap.data()!;
+        if (data.meetLockOwnerToken !== lockOwnerToken) return;
+        if (isValidMeetUrl(data.meetUrl)) return;
+
+        transaction.set(
+          bookingRef,
+          {
+            meetProvisioningStatus: classification === 'uncertain' ? 'uncertain' : 'failed',
+            meetLockOwnerToken: null,
+            meetLockExpiresAt: null,
+            meetLastError: safeErrorMessage,
+            meetProvisioningUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      });
+    } catch (cleanupErr) {
+      console.error('Error al actualizar estado de lock Meet tras fallo:', cleanupErr);
+    }
+
+    if (classification === 'uncertain') {
+      throw new HttpsError(
+        'deadline-exceeded',
+        'No se pudo confirmar si Google Meet creó la sala debido a un timeout o error incierto. Para evitar salas duplicadas, no se reintentará automáticamente.'
+      );
+    }
+
+    if (httpStatus === 401 || httpStatus === 403) {
+      throw new HttpsError(
+        'unauthenticated',
+        'La autorización OAuth de Google Meet venció o no tiene permisos suficientes. Autorizá nuevamente con tu cuenta de Google.'
+      );
+    }
+
+    if (httpStatus === 400) {
+      throw new HttpsError('invalid-argument', safeErrorMessage);
+    }
+
+    throw new HttpsError(
+      'unavailable',
+      'Google Meet API no pudo crear la sala en este momento. Podés reintentar nuevamente.'
+    );
+  }
+
+  const finalMeetUrl = createdSpace.meetUrl.trim();
+  const finalMeetSpaceName =
+    typeof createdSpace.meetSpaceName === 'string' && createdSpace.meetSpaceName.trim()
+      ? createdSpace.meetSpaceName.trim()
+      : null;
+
+  // =========================================================================
+  // TRANSACCIÓN 2: Persistencia atómica en booking + todas sus lessons
+  // (SIN modificar campos de pago, fechas, horarios ni reservas)
+  // =========================================================================
+  const allLessonIds = Array.from(
+    new Set([
+      ...tx1Result.lessonIdsFromBooking,
+      ...linkedLessonsSnap.docs.map((d) => d.id),
+    ])
+  );
+
+  try {
+    const updatedLessonsCount = await db.runTransaction(async (transaction) => {
+      const bookingSnap = await transaction.get(bookingRef);
+      if (!bookingSnap.exists) {
+        throw new HttpsError('not-found', 'El abono mensual dejó de existir.');
+      }
+
+      const bookingData = bookingSnap.data()!;
+      if (bookingData.status !== 'confirmed') {
+        throw new HttpsError(
+          'failed-precondition',
+          'El estado del abono dejó de estar confirmado.'
+        );
+      }
+
+      const lessonRefs = allLessonIds.map((lid) => db.doc(`lessons/${lid}`));
+      const lessonSnaps = await Promise.all(lessonRefs.map((ref) => transaction.get(ref)));
+
+      transaction.set(
+        bookingRef,
+        {
+          meetUrl: finalMeetUrl,
+          meetSpaceName: finalMeetSpaceName,
+          meetProvisioningStatus: 'ready',
+          meetLockOwnerToken: null,
+          meetLockExpiresAt: null,
+          meetLastError: null,
+          meetProvisionedAt: admin.firestore.FieldValue.serverTimestamp(),
+          meetProvisioningUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      let count = 0;
+      for (let i = 0; i < lessonRefs.length; i++) {
+        const lSnap = lessonSnaps[i];
+        if (!lSnap.exists) continue;
+        const lData = lSnap.data()!;
+        if (lData.status === 'cancelled' || lData.status === 'expired') continue;
+
+        transaction.set(
+          lessonRefs[i],
+          {
+            meetUrl: finalMeetUrl,
+            meetSpaceName: finalMeetSpaceName,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+        count++;
+      }
+
+      return count;
+    });
+
+    return {
+      success: true,
+      bookingId: sanitizedBookingId,
+      meetUrl: finalMeetUrl,
+      meetSpaceName: finalMeetSpaceName,
+      updatedLessonsCount,
+      alreadyProvisioned: false,
+      message: `Sala única de Google Meet creada y asignada a ${updatedLessonsCount} clase(s) del abono.`,
+    };
+  } catch (persistErr: any) {
+    if (persistErr instanceof HttpsError) {
+      throw persistErr;
+    }
+
+    // Resiliencia ante fallo parcial tras creación exitosa de la sala:
+    // conservar meetUrl en monthlyBookings/{bookingId} para que el reintento propague a lessons sin recrear sala.
+    try {
+      await bookingRef.set(
+        {
+          meetUrl: finalMeetUrl,
+          meetSpaceName: finalMeetSpaceName,
+          meetProvisioningStatus: 'ready',
+          meetLockOwnerToken: null,
+          meetLockExpiresAt: null,
+          meetLastError: 'partial_lesson_sync',
+          meetProvisionedAt: admin.firestore.FieldValue.serverTimestamp(),
+          meetProvisioningUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    } catch (recoveryErr) {
+      console.error('Error al resguardar meetUrl tras fallo parcial de sincronización:', recoveryErr);
+    }
+
+    throw new HttpsError(
+      'internal',
+      'La sala Google Meet se creó, pero ocurrió un error parcial al asignarla a las clases. Reintentá la sincronización para propagar la misma sala.'
+    );
+  }
 }
 
 /**

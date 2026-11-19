@@ -32,6 +32,7 @@ import {
   formatLessonTime,
   getLessonStatusLabel,
 } from '../utils/dateUtils';
+import { canJoinLessonMeet } from '../utils/meetValidation';
 import type { Lesson } from '../types/lesson';
 
 interface LessonPageProps {
@@ -216,10 +217,10 @@ export const LessonPage: React.FC<LessonPageProps> = ({ lessonId, onNavigate }) 
         {/* Lado derecho: Botón Google Meet + Notificaciones + Perfil */}
         <div className="flex items-center gap-2.5 sm:gap-4 shrink-0">
           {/* Botón Abrir GoogleMeet */}
-          {lesson?.meetUrl ? (
+          {canJoinLessonMeet(lesson) ? (
             <a
               id="btn-open-lesson-meet"
-              href={lesson.meetUrl}
+              href={lesson!.meetUrl!.trim()}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-full bg-white hover:bg-slate-50 border border-slate-200/90 text-xs sm:text-sm font-semibold text-slate-800 shadow-2xs transition cursor-pointer"
@@ -230,7 +231,11 @@ export const LessonPage: React.FC<LessonPageProps> = ({ lessonId, onNavigate }) 
           ) : (
             <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-100 text-slate-500 text-xs font-semibold">
               <Video className="w-3.5 h-3.5" />
-              <span>Meet sin asignar</span>
+              <span>
+                {(lesson as any)?.paymentStatus === 'pending_confirmation'
+                  ? 'Meet pendiente de pago'
+                  : 'Meet sin asignar'}
+              </span>
             </div>
           )}
 
@@ -578,10 +583,10 @@ export const LessonPage: React.FC<LessonPageProps> = ({ lessonId, onNavigate }) 
                   </span>
                 </div>
               </div>
-              {lesson.meetUrl && (
+              {canJoinLessonMeet(lesson) && (
                 <div className="pt-2">
                   <a
-                    href={lesson.meetUrl}
+                    href={lesson.meetUrl!.trim()}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center justify-center gap-2 w-full py-2 bg-[#4361EE] hover:bg-indigo-600 text-white font-bold rounded-2xl transition cursor-pointer"

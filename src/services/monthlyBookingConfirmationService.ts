@@ -45,6 +45,7 @@ import type {
   TeacherSlotLock,
   CreateTemporaryMonthlyBookingPayload,
   TemporaryMonthlyBookingResult,
+  ProvisionMonthlyBookingMeetResult,
 } from '../types/monthlyBooking';
 import type { UserProfile } from '../types/auth';
 import { fetchUserProfile } from './authService';
@@ -821,6 +822,27 @@ export async function confirmMonthlyBookingPayment(
 }
 
 /**
+ * Etapa 2 Google Meet:
+ * Solicita a Cloud Functions la generación idempotente (o sincronización) de la sala única
+ * de Google Meet exclusiva para un abono mensual ya confirmado.
+ */
+export async function provisionMonthlyBookingMeet(
+  bookingId: string,
+  meetAccessToken?: string
+): Promise<ProvisionMonthlyBookingMeetResult> {
+  const provisionMeetFn = httpsCallable<
+    { bookingId: string; meetAccessToken?: string },
+    ProvisionMonthlyBookingMeetResult
+  >(functions, 'provisionMonthlyBookingMeet');
+
+  const result = await provisionMeetFn({
+    bookingId,
+    ...(meetAccessToken ? { meetAccessToken } : {}),
+  });
+  return result.data;
+}
+
+/**
  * Reconstruye abonos mensuales a partir de las clases del profesor.
  * Permite mantener la visibilidad en entornos donde las reglas de 'monthlyBookings'
  * aún no han sido desplegadas en Firebase.
@@ -929,6 +951,10 @@ export function reconstructMonthlyBookingsFromLessons(
       createdAt: (first as any).createdAt || first.date || new Date(),
       updatedAt: (first as any).updatedAt || new Date(),
       expiresAt: (first as any).expiresAt || null,
+      meetUrl: groupLessons.find((l) => typeof l.meetUrl === 'string' && l.meetUrl.trim())?.meetUrl || null,
+      meetSpaceName:
+        groupLessons.find((l) => typeof l.meetSpaceName === 'string' && l.meetSpaceName.trim())
+          ?.meetSpaceName || null,
     });
   }
 

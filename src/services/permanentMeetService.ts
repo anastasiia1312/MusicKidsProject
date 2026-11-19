@@ -1,12 +1,20 @@
 import {
   doc,
   getDoc,
+  getDocs,
   setDoc,
+  updateDoc,
+  collection,
+  query,
+  where,
   serverTimestamp,
 } from 'firebase/firestore';
 import { db, auth } from './firebase';
 import { createGoogleMeetSpace, type GoogleMeetSpaceResult } from './meetService';
 import type { PermanentMeetSpaceResult } from '../types/permanentMeet';
+import { isValidMeetUrl } from '../utils/meetValidation';
+
+export { isValidMeetUrl };
 
 /**
  * Mapa en memoria para deduplicar operaciones concurrentes hacia Google Meet API.
@@ -23,15 +31,6 @@ import type { PermanentMeetSpaceResult } from '../types/permanentMeet';
  * la API de Google Meet.
  */
 const inFlightPromises = new Map<string, Promise<PermanentMeetSpaceResult>>();
-
-/**
- * Valida si una URL de Google Meet tiene un formato estructural válido.
- */
-export function isValidMeetUrl(url?: string | null): boolean {
-  if (!url || typeof url !== 'string') return false;
-  const trimmed = url.trim();
-  return trimmed.startsWith('https://meet.google.com/') && trimmed.length > 24;
-}
 
 /**
  * Consulta la sala permanente guardada de un profesor.
@@ -167,6 +166,11 @@ export async function getOrCreateTeacherPermanentMeetSpace(
     // 1. Consultar si ya existe una sala permanente guardada en la subcolección privada
     const existing = await getTeacherPermanentMeetSpace(trimmedId);
     if (existing && isValidMeetUrl(existing.meetUrl)) {
+      // Sincronizar en segundo plano clases confirmadas que aún no tengan meetUrl asignado
+      syncTeacherPermanentMeetToLessons(trimmedId, existing.meetUrl, existing.meetSpaceName).catch((syncErr) => {
+        console.warn('Aviso en sincronización en segundo plano de clases:', syncErr);
+      });
+
       return {
         meetUrl: existing.meetUrl,
         meetSpaceName: existing.meetSpaceName,
@@ -177,7 +181,7 @@ export async function getOrCreateTeacherPermanentMeetSpace(
     // 2. Comprobar que el usuario actual es el profesor titular autenticado
     const currentUser = auth.currentUser;
     if (!currentUser) {
-      throw new Error('Debes iniciar sesión para configurar tu sala de Google Meet.');
+      throw new Error('Debes iniciar sesión para autorizar Google Meet.');
     }
     if (currentUser.uid !== trimmedId) {
       throw new Error('Solo el propio profesor puede autorizar y crear su sala de Google Meet.');
@@ -193,6 +197,9 @@ export async function getOrCreateTeacherPermanentMeetSpace(
     // 4. Persistir de forma segura y exclusiva en la subcolección privada
     await saveTeacherPermanentMeetSpace(trimmedId, createdSpace);
 
+    // 5. Sincronizar automáticamente con clases confirmadas del profesor
+    await syncTeacherPermanentMeetToLessons(trimmedId, createdSpace.meetUrl, createdSpace.meetSpaceName);
+
     return {
       meetUrl: createdSpace.meetUrl,
       meetSpaceName: createdSpace.meetSpaceName,
@@ -207,5 +214,69 @@ export async function getOrCreateTeacherPermanentMeetSpace(
     return await taskPromise;
   } finally {
     inFlightPromises.delete(trimmedId);
+  }
+}
+
+/**
+ * Alias oficial según especificación de requerimientos
+ */
+export const getOrCreateTeacherMeetSpace = getOrCreateTeacherPermanentMeetSpace;
+
+/**
+ * Sincroniza la sala permanente de Google Meet a todas las clases confirmadas y activas del profesor
+ * que actualmente tengan `meetUrl: null` o vacío en Firestore.
+ * Esto asegura que clases confirmadas previamente (como las creadas antes de configurar la sala)
+ * queden inmediatamente vinculadas a la misma reunión para profesor y alumno sin duplicar reuniones.
+ */
+export async function syncTeacherPermanentMeetToLessons(
+  teacherId: string,
+  meetUrl: string,
+  meetSpaceName?: string
+): Promise<{ updatedCount: number }> {
+  if (!teacherId || !isValidMeetUrl(meetUrl)) {
+    return { updatedCount: 0 };
+  }
+
+  const trimmedId = teacherId.trim();
+  const trimmedUrl = meetUrl.trim();
+
+  try {
+    const q = query(
+      collection(db, 'lessons'),
+      where('teacherId', '==', trimmedId)
+    );
+    const snap = await getDocs(q);
+
+    let updatedCount = 0;
+    const batchUpdates: Promise<void>[] = [];
+
+    snap.forEach((docSnap) => {
+      const data = docSnap.data();
+      const isConfirmed = data.paymentStatus === 'confirmed';
+      const isActive = data.status !== 'cancelled' && data.status !== 'expired';
+      const isMissingMeetUrl =
+        !data.meetUrl || typeof data.meetUrl !== 'string' || data.meetUrl.trim() === '';
+
+      if (isConfirmed && isActive && isMissingMeetUrl) {
+        const lessonRef = doc(db, 'lessons', docSnap.id);
+        batchUpdates.push(
+          updateDoc(lessonRef, {
+            meetUrl: trimmedUrl,
+            meetSpaceName: meetSpaceName || data.meetSpaceName || '',
+            updatedAt: serverTimestamp(),
+          })
+        );
+        updatedCount++;
+      }
+    });
+
+    if (batchUpdates.length > 0) {
+      await Promise.all(batchUpdates);
+    }
+
+    return { updatedCount };
+  } catch (err) {
+    console.warn('Aviso al sincronizar meetUrl en lecciones existentes:', err);
+    return { updatedCount: 0 };
   }
 }

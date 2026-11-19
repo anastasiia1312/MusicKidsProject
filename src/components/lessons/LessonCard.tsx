@@ -2,6 +2,7 @@ import React from 'react';
 import { Calendar, Clock, User, ArrowRight, Music2, Video } from 'lucide-react';
 import type { Lesson } from '../../types/lesson';
 import { formatLessonDateTime, getLessonStatusLabel } from '../../utils/dateUtils';
+import { canJoinLessonMeet } from '../../utils/meetValidation';
 
 interface LessonCardProps {
   lesson: Lesson;
@@ -22,6 +23,7 @@ export const LessonCard: React.FC<LessonCardProps> = ({
 
   const statusLabel = getLessonStatusLabel(lesson.status);
   const meetActionLabel = viewerRole === 'teacher' ? 'Iniciar clase' : 'Unirse a la clase';
+  const canJoinMeet = canJoinLessonMeet(lesson);
 
   return (
     <div
@@ -67,10 +69,10 @@ export const LessonCard: React.FC<LessonCardProps> = ({
 
       {/* Botones de acción */}
       <div className="flex flex-col sm:flex-row items-center gap-2 pt-2 border-t border-slate-100">
-        {lesson.meetUrl ? (
+        {canJoinMeet ? (
           <a
             id={`btn-meet-lesson-${lesson.id}`}
-            href={lesson.meetUrl}
+            href={lesson.meetUrl!.trim()}
             target="_blank"
             rel="noopener noreferrer"
             className="w-full sm:flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs sm:text-sm shadow-sm shadow-indigo-200 transition-all cursor-pointer text-center"
@@ -85,7 +87,7 @@ export const LessonCard: React.FC<LessonCardProps> = ({
           type="button"
           onClick={() => onNavigate(`/lesson/${lesson.id}`)}
           className={`flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold text-xs sm:text-sm border border-slate-200 transition-all cursor-pointer ${
-            lesson.meetUrl ? 'w-full sm:w-auto shrink-0' : 'w-full'
+            canJoinMeet ? 'w-full sm:w-auto shrink-0' : 'w-full'
           }`}
         >
           <span>Ver clase</span>

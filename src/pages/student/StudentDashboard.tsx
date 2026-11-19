@@ -21,6 +21,7 @@ import {
   Sparkles,
   Headphones,
   BookOpen,
+  CheckCircle2,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { getStudentLessons } from '../../services/lessonService';
@@ -30,6 +31,7 @@ import {
   formatLessonDateTime,
   getLessonStatusLabel,
 } from '../../utils/dateUtils';
+import { canJoinLessonMeet, isLessonMeetAuthorized } from '../../utils/meetValidation';
 import type { Lesson } from '../../types/lesson';
 
 interface StudentDashboardProps {
@@ -514,104 +516,136 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
             </div>
           ) : (
             <div className="space-y-4">
-              {activeLessons.map((lesson) => (
-                <div
-                  key={lesson.id}
-                  id={`lesson-card-${lesson.id}`}
-                  className="bg-white rounded-[24px] p-5 sm:p-6 shadow-xs border border-slate-100 hover:shadow-md transition-shadow flex flex-col sm:flex-row sm:items-center justify-between gap-5 relative group"
-                >
-                  {/* Lado Izquierdo: Icono Musical + Información de la Clase */}
-                  <div className="flex items-center gap-4 sm:gap-5 min-w-0">
-                    {/* Icono musical en contenedor celeste */}
-                    <div className="w-16 h-16 sm:w-18 sm:h-18 rounded-2xl bg-[#DDF1F8] text-[#00537A] flex items-center justify-center shrink-0">
-                      <Music className="w-8 h-8 sm:w-9 sm:h-9 stroke-[2]" />
-                    </div>
+              {activeLessons.map((lesson) => {
+                const isPendingPayment = (lesson as any).paymentStatus === 'pending_confirmation';
+                const isConfirmedPayment =
+                  (lesson as any).paymentStatus === 'confirmed' ||
+                  (!(lesson as any).paymentStatus && (lesson as any).bookingType === 'manual');
+                const isAuthorized = isLessonMeetAuthorized(lesson);
 
-                    {/* Información */}
-                    <div className="min-w-0 flex-1">
-                      {/* Badges de tiempo y estado */}
-                      <div className="flex flex-wrap items-center gap-2 mb-2 select-none">
-                        <div className="inline-flex items-center bg-[#FFEAA7] text-[#7A5A00] text-xs font-semibold px-3 py-1 rounded-full">
-                          {getLessonTimingLabel(lesson.date)}
-                        </div>
-                        {lesson.status && (
-                          <div className="inline-flex items-center bg-slate-100 text-slate-600 text-xs font-semibold px-2.5 py-1 rounded-full">
-                            {getLessonStatusLabel(lesson.status)}
-                          </div>
-                        )}
+                // El acceso a Google Meet se habilita ÚNICAMENTE para clases autorizadas/confirmadas con URL válida
+                const canJoinMeet = isAuthorized && canJoinLessonMeet(lesson);
+
+                return (
+                  <div
+                    key={lesson.id}
+                    id={`lesson-card-${lesson.id}`}
+                    className="bg-white rounded-[24px] p-5 sm:p-6 shadow-xs border border-slate-100 hover:shadow-md transition-shadow flex flex-col sm:flex-row sm:items-center justify-between gap-5 relative group"
+                  >
+                    {/* Lado Izquierdo: Icono Musical + Información de la Clase */}
+                    <div className="flex items-center gap-4 sm:gap-5 min-w-0">
+                      {/* Icono musical en contenedor celeste */}
+                      <div className="w-16 h-16 sm:w-18 sm:h-18 rounded-2xl bg-[#DDF1F8] text-[#00537A] flex items-center justify-center shrink-0">
+                        <Music className="w-8 h-8 sm:w-9 sm:h-9 stroke-[2]" />
                       </div>
 
-                      {/* Título de la clase */}
-                      <h3
-                        onClick={() => onNavigate(`/lesson/${lesson.id}`)}
-                        className="font-parkinsans text-lg sm:text-xl font-bold text-slate-900 truncate hover:text-[#00537A] transition-colors cursor-pointer"
-                        style={{ fontFamily: "'Parkinsans', sans-serif" }}
-                        title="Entrar al aula de la clase"
-                      >
-                        {lesson.title}
-                      </h3>
-
-                      {/* Datos de la clase: Profesor, Fecha y Duración */}
-                      <div
-                        className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs sm:text-sm text-slate-600 mt-1.5 font-siemreap"
-                        style={{ fontFamily: "'Siemreap', sans-serif" }}
-                      >
-                        <div className="flex items-center gap-1.5">
-                          <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                          <span>Profesor/a:</span>
-                          <span className="font-semibold text-slate-800 truncate">
-                            {lesson.teacherName || 'Profesor'}
-                          </span>
+                      {/* Información */}
+                      <div className="min-w-0 flex-1">
+                        {/* Badges de tiempo y estado */}
+                        <div className="flex flex-wrap items-center gap-2 mb-2 select-none">
+                          <div className="inline-flex items-center bg-[#FFEAA7] text-[#7A5A00] text-xs font-semibold px-3 py-1 rounded-full">
+                            {getLessonTimingLabel(lesson.date)}
+                          </div>
+                          {isPendingPayment && (
+                            <div className="inline-flex items-center bg-amber-100 text-amber-900 border border-amber-200 text-xs font-bold px-2.5 py-0.5 rounded-full">
+                              <Clock className="w-3 h-3 mr-1 text-amber-700" />
+                              <span>Transferencia por confirmar</span>
+                            </div>
+                          )}
+                          {isConfirmedPayment && (
+                            <div className="inline-flex items-center bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold px-2.5 py-0.5 rounded-full">
+                              <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-600" />
+                              <span>Abono confirmado</span>
+                            </div>
+                          )}
+                          {lesson.status && !isPendingPayment && !isConfirmedPayment && (
+                            <div className="inline-flex items-center bg-slate-100 text-slate-600 text-xs font-semibold px-2.5 py-1 rounded-full">
+                              {getLessonStatusLabel(lesson.status)}
+                            </div>
+                          )}
                         </div>
 
-                        <div className="flex items-center gap-1.5">
-                          <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                          <span>{formatLessonDateTime(lesson.date)}</span>
-                        </div>
+                        {/* Título de la clase */}
+                        <h3
+                          onClick={() => onNavigate(`/lesson/${lesson.id}`)}
+                          className="font-parkinsans text-lg sm:text-xl font-bold text-slate-900 truncate hover:text-[#00537A] transition-colors cursor-pointer"
+                          style={{ fontFamily: "'Parkinsans', sans-serif" }}
+                          title="Entrar al aula de la clase"
+                        >
+                          {lesson.title}
+                        </h3>
 
-                        {lesson.duration && (
+                        {/* Datos de la clase: Profesor, Fecha y Duración */}
+                        <div
+                          className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs sm:text-sm text-slate-600 mt-1.5 font-siemreap"
+                          style={{ fontFamily: "'Siemreap', sans-serif" }}
+                        >
                           <div className="flex items-center gap-1.5">
-                            <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            <span>{lesson.duration} min</span>
+                            <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span>Profesor/a:</span>
+                            <span className="font-semibold text-slate-800 truncate">
+                              {lesson.teacherName || 'Profesor'}
+                            </span>
                           </div>
-                        )}
+
+                          <div className="flex items-center gap-1.5">
+                            <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span>{formatLessonDateTime(lesson.date)}</span>
+                          </div>
+
+                          {lesson.duration && (
+                            <div className="flex items-center gap-1.5">
+                              <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <span>{lesson.duration} min</span>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  {/* Lado Derecho: Acceso a la clase (Google Meet y Aula virtual) */}
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2.5 shrink-0 pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-100">
-                    {/* Botón Meet si existe enlace */}
-                    {lesson.meetUrl && (
-                      <a
-                        id={`btn-meet-lesson-${lesson.id}`}
-                        href={lesson.meetUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="bg-[#00537A] hover:bg-[#004262] active:scale-95 text-white font-semibold text-sm sm:text-base px-5 sm:px-6 py-2.5 rounded-full shadow-2xs transition-all cursor-pointer whitespace-nowrap text-center flex items-center justify-center gap-2"
+                    {/* Lado Derecho: Acceso a la clase (Google Meet y Aula virtual) */}
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2.5 shrink-0 pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-100">
+                      {/* Botón Meet: Exclusivo para clases confirmadas y activas con enlace válido */}
+                      {canJoinMeet ? (
+                        <a
+                          id={`btn-meet-lesson-${lesson.id}`}
+                          href={lesson.meetUrl!.trim()}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="bg-[#00537A] hover:bg-[#004262] active:scale-95 text-white font-semibold text-sm sm:text-base px-5 sm:px-6 py-2.5 rounded-full shadow-2xs transition-all cursor-pointer whitespace-nowrap text-center flex items-center justify-center gap-2"
+                        >
+                          <Video className="w-4 h-4 shrink-0" />
+                          <span>Unirse a Meet</span>
+                        </a>
+                      ) : isPendingPayment ? (
+                        <button
+                          type="button"
+                          disabled
+                          title="Se habilitará Google Meet una vez que el profesor confirme la recepción del pago"
+                          className="bg-slate-200 text-slate-500 font-semibold text-xs sm:text-sm px-4 sm:px-5 py-2.5 rounded-full shadow-2xs cursor-not-allowed whitespace-nowrap text-center"
+                        >
+                          Meet (Pendiente de pago)
+                        </button>
+                      ) : null}
+
+                      {/* Botón Aula Virtual: Siempre disponible e independiente */}
+                      <button
+                        id={`btn-view-lesson-${lesson.id}`}
+                        type="button"
+                        onClick={() => onNavigate(`/lesson/${lesson.id}`)}
+                        className={`${
+                          canJoinMeet
+                            ? 'bg-slate-100 hover:bg-slate-200 text-slate-800'
+                            : 'bg-[#00537A] hover:bg-[#004262] text-white'
+                        } active:scale-95 font-semibold text-sm sm:text-base px-5 sm:px-6 py-2.5 rounded-full shadow-2xs transition-all cursor-pointer whitespace-nowrap text-center flex items-center justify-center gap-1.5`}
                       >
-                        <Video className="w-4 h-4 shrink-0" />
-                        <span>Unirse a Meet</span>
-                      </a>
-                    )}
-
-                    {/* Botón Aula Virtual */}
-                    <button
-                      id={`btn-view-lesson-${lesson.id}`}
-                      type="button"
-                      onClick={() => onNavigate(`/lesson/${lesson.id}`)}
-                      className={`${
-                        lesson.meetUrl
-                          ? 'bg-slate-100 hover:bg-slate-200 text-slate-800'
-                          : 'bg-[#00537A] hover:bg-[#004262] text-white'
-                      } active:scale-95 font-semibold text-sm sm:text-base px-5 sm:px-6 py-2.5 rounded-full shadow-2xs transition-all cursor-pointer whitespace-nowrap text-center flex items-center justify-center gap-1.5`}
-                    >
-                      <span>Aula virtual</span>
-                      <ArrowRight className="w-4 h-4 shrink-0" />
-                    </button>
+                        <span>Aula virtual</span>
+                        <ArrowRight className="w-4 h-4 shrink-0" />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
 

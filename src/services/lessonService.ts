@@ -254,6 +254,7 @@ export async function populateLessonUsers(lessons: Lesson[]): Promise<Lesson[]> 
 
       return {
         ...lesson,
+        meetUrl: lesson.meetUrl,
         teacherName: teacher?.name || 'Profesor',
         teacherEmail: teacher?.email || '',
         studentName: student?.name || 'Alumno',

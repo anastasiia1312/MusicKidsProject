@@ -12,6 +12,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { Navbar } from '../../components/common/Navbar';
 import { getStudents, createLesson } from '../../services/lessonService';
+import { getOrCreateTeacherPermanentMeetSpace } from '../../services/permanentMeetService';
 import { combineDateAndTimeToTimestamp } from '../../utils/dateUtils';
 import { LESSON_DURATION_MINUTES } from '../../types/lesson';
 import type { UserProfile } from '../../types/auth';
@@ -113,6 +114,14 @@ export const CreateLesson: React.FC<CreateLessonProps> = ({ onNavigate }) => {
     }
 
     try {
+      if (user?.uid) {
+        try {
+          await getOrCreateTeacherPermanentMeetSpace(user.uid);
+        } catch (meetErr) {
+          console.warn('Aviso: no se pudo auto-inicializar Google Meet en createLesson:', meetErr);
+        }
+      }
+
       const timestamp = combineDateAndTimeToTimestamp(date, time);
 
       await createLesson({

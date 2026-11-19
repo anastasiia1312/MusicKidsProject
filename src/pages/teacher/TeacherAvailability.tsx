@@ -45,7 +45,7 @@ import {
   checkPunctualSlotExceptionConflict,
 } from '../../services/teacherScheduleExceptionService';
 import { getTeacherLessons } from '../../services/lessonService';
-import { getOrCreateTeacherPermanentMeetSpace } from '../../services/permanentMeetService';
+import { canJoinLessonMeet, isValidMeetUrl } from '../../utils/meetValidation';
 import type {
   AvailabilityDuration,
   TeacherAvailability as TeacherAvailabilityType,
@@ -854,6 +854,13 @@ export const TeacherAvailability: React.FC<TeacherAvailabilityProps> = ({ onNavi
           return `${lHours}:${lMins}` === leg.startTime;
         });
 
+        const authorizedMeetUrl =
+          matchingLegacyLesson && canJoinLessonMeet(matchingLegacyLesson)
+            ? matchingLegacyLesson.meetUrl?.trim()
+            : !matchingLegacyLesson && isValidMeetUrl(leg.meetUrl)
+            ? leg.meetUrl?.trim()
+            : undefined;
+
         daySlots.push({
           id: leg.id || `legacy-${leg.date}-${leg.startTime}`,
           sourceType: 'legacy',
@@ -862,14 +869,14 @@ export const TeacherAvailability: React.FC<TeacherAvailabilityProps> = ({ onNavi
           startTime: leg.startTime,
           duration: leg.duration,
           status: 'booked',
-          meetUrl: leg.meetUrl || matchingLegacyLesson?.meetUrl,
+          meetUrl: authorizedMeetUrl,
           bookedLesson: matchingLegacyLesson,
           bookedLessonTitle: matchingLegacyLesson?.title,
           bookedStudentName: matchingLegacyLesson?.studentName,
           bookedStudentEmail: matchingLegacyLesson?.studentEmail,
         });
       } else if (!isDayFullyBlocked) {
-        // Horario puntual disponible (se muestra solo si la fecha no está bloqueada ni en vacaciones)
+        // Horario puntual disponible: los horarios libres nunca generan ni muestran salas Meet
         daySlots.push({
           id: leg.id || `legacy-${leg.date}-${leg.startTime}`,
           sourceType: 'legacy',
@@ -878,7 +885,6 @@ export const TeacherAvailability: React.FC<TeacherAvailabilityProps> = ({ onNavi
           startTime: leg.startTime,
           duration: leg.duration,
           status: 'available',
-          meetUrl: leg.meetUrl,
         });
       }
     });
@@ -936,7 +942,9 @@ export const TeacherAvailability: React.FC<TeacherAvailabilityProps> = ({ onNavi
           startTime: rec.startTime,
           duration: rec.duration,
           status: 'booked',
-          meetUrl: overlappingLesson.meetUrl,
+          meetUrl: canJoinLessonMeet(overlappingLesson)
+            ? overlappingLesson.meetUrl?.trim()
+            : undefined,
           bookedLesson: overlappingLesson,
           bookedLessonTitle: overlappingLesson.title,
           bookedStudentName: overlappingLesson.studentName,

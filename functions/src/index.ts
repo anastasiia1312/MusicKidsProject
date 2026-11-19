@@ -19,12 +19,15 @@ import type {
   GetTeacherPublicAvailabilityResponse,
   ExpireMonthlyBookingsPayload,
   ExpireMonthlyBookingsResponse,
+  ProvisionMonthlyBookingMeetPayload,
+  ProvisionMonthlyBookingMeetResponse,
 } from './types';
 import {
   createMonthlyBookingTransaction,
   confirmMonthlyBookingPaymentTransaction,
   getTeacherPublicAvailabilityHelper,
   expireMonthlyBookingsBatch,
+  provisionMonthlyBookingMeetService,
 } from './monthlyBookingService';
 import { createManualLessonTransaction } from './manualLessonService';
 
@@ -275,4 +278,53 @@ export const expirePendingMonthlyBookingsCallable = onCall(
     }
   }
 );
+
+/**
+ * Cloud Function v2 Callable: Provisión idempotente de sala única de Google Meet
+ * por abono mensual confirmado (Etapa 2 Google Meet).
+ *
+ * - Verifica autenticación (request.auth.uid), pertenencia del profesor,
+ *   estado 'confirmed' e idempotencia por bookingId.
+ * - Utiliza bloqueo persistente en Firestore (sin llamadas externas dentro de transacciones).
+ * - Crea la sala vía Google Meet REST API v2 usando el token OAuth del profesor
+ *   y propaga meetUrl + meetSpaceName al abono y todas sus lessons.
+ */
+export const provisionMonthlyBookingMeet = onCall(
+  {
+    region: 'us-central1',
+    cors: true,
+  },
+  async (request): Promise<ProvisionMonthlyBookingMeetResponse> => {
+    if (!request.auth || !request.auth.uid) {
+      throw new HttpsError(
+        'unauthenticated',
+        'Debe iniciar sesión como profesor para generar la sala de Google Meet del abono.'
+      );
+    }
+
+    const authenticatedTeacherId = request.auth.uid;
+    const data = request.data as ProvisionMonthlyBookingMeetPayload;
+
+    if (!data || typeof data !== 'object') {
+      throw new HttpsError(
+        'invalid-argument',
+        'Los datos para provisionar la sala de Google Meet son obligatorios.'
+      );
+    }
+
+    try {
+      return await provisionMonthlyBookingMeetService(db, authenticatedTeacherId, data);
+    } catch (err: any) {
+      if (err instanceof HttpsError) {
+        throw err;
+      }
+      console.error('Error al procesar provisionMonthlyBookingMeet:', err);
+      throw new HttpsError(
+        'internal',
+        err?.message || 'Error interno al provisionar la sala de Google Meet.'
+      );
+    }
+  }
+);
+
 

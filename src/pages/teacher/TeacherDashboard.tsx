@@ -14,13 +14,17 @@ import {
   X,
   ShieldCheck,
   CreditCard,
+  Video,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { getTeacherLessons, getStudents } from '../../services/lessonService';
 import {
   getTeacherMonthlyBookings,
   confirmMonthlyBookingPayment,
+  provisionMonthlyBookingMeet,
 } from '../../services/monthlyBookingConfirmationService';
+import { getGoogleMeetAccessToken, resetMeetTokenCache } from '../../services/meetService';
+import { canJoinLessonMeet, isValidMeetUrl } from '../../utils/meetValidation';
 import { getLessonTimingLabel } from '../../utils/dateUtils';
 import type { Lesson } from '../../types/lesson';
 import type { UserProfile } from '../../types/auth';
@@ -180,6 +184,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
   const [isConfirming, setIsConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [confirmSuccessMessage, setConfirmSuccessMessage] = useState<string | null>(null);
+  const [meetProvisionWarning, setMeetProvisionWarning] = useState<{
+    bookingId: string;
+    message: string;
+    isUncertain?: boolean;
+  } | null>(null);
+  const [provisioningBookingIds, setProvisioningBookingIds] = useState<Record<string, boolean>>({});
   const [showExpiredBookingsHistory, setShowExpiredBookingsHistory] = useState(false);
 
   const loadData = async () => {
@@ -269,9 +279,131 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
     });
   }, [lessons]);
 
+  const bookingByIdMap = useMemo(() => {
+    const map = new Map<string, MonthlyBooking>();
+    for (const b of monthlyBookings) {
+      if (b.id) map.set(b.id, b);
+    }
+    return map;
+  }, [monthlyBookings]);
+
+  // Abonos confirmados que aún no tienen sala Google Meet válida (o tienen clases sin sincronizar)
+  const confirmedBookingsNeedingMeet = useMemo(() => {
+    return monthlyBookings.filter((b) => {
+      if (!b.id || b.status !== 'confirmed') return false;
+      if (!isValidMeetUrl(b.meetUrl)) return true;
+
+      const linkedActiveLessons = lessons.filter(
+        (l) =>
+          (l as any).monthlyBookingId === b.id &&
+          l.status !== 'cancelled' &&
+          l.status !== 'expired'
+      );
+      return linkedActiveLessons.some((l) => !isValidMeetUrl(l.meetUrl));
+    });
+  }, [monthlyBookings, lessons]);
+
+  const classifyMeetProvisionError = (
+    err: any
+  ): { message: string; isUncertain: boolean } => {
+    const code = String(err?.code || '').toLowerCase();
+    const rawMsg = String(err?.message || '');
+    const lower = rawMsg.toLowerCase();
+
+    if (code.includes('unauthenticated')) {
+      resetMeetTokenCache();
+      return {
+        message:
+          'Tu autorización de Google Meet venció o no es válida. Hacé clic en "Reintentar sala Meet" para volver a autorizar con tu cuenta de Google.',
+        isUncertain: false,
+      };
+    }
+
+    if (
+      code.includes('popup-closed-by-user') ||
+      code.includes('cancelled-popup-request') ||
+      code.includes('popup-blocked')
+    ) {
+      return {
+        message: rawMsg || 'No se completó la ventana de autorización de Google Meet.',
+        isUncertain: false,
+      };
+    }
+
+    if (
+      code.includes('deadline-exceeded') ||
+      lower.includes('incierto') ||
+      lower.includes('salas duplicadas')
+    ) {
+      return {
+        message:
+          rawMsg ||
+          'El servidor no pudo confirmar si Google Meet creó la sala debido a un timeout. Para evitar salas duplicadas, el reintento automático está bloqueado.',
+        isUncertain: true,
+      };
+    }
+
+    if (code.includes('aborted')) {
+      return {
+        message:
+          rawMsg ||
+          'Ya hay otra solicitud generando la sala de Google Meet para este abono. Esperá unos segundos y verificá nuevamente.',
+        isUncertain: false,
+      };
+    }
+
+    return {
+      message:
+        rawMsg && !rawMsg.includes('INTERNAL')
+          ? rawMsg
+          : 'No se pudo generar la sala de Google Meet en este momento. El pago sigue confirmado y podés reintentarlo cuando quieras.',
+      isUncertain: false,
+    };
+  };
+
+  const handleProvisionMeetForBooking = async (
+    bookingId: string,
+    bookingHasExistingValidUrl = false
+  ) => {
+    if (!bookingId || provisioningBookingIds[bookingId]) return;
+
+    setProvisioningBookingIds((prev) => ({ ...prev, [bookingId]: true }));
+    setMeetProvisionWarning(null);
+    setConfirmSuccessMessage(null);
+
+    try {
+      let accessToken: string | undefined;
+      if (!bookingHasExistingValidUrl) {
+        accessToken = await getGoogleMeetAccessToken();
+      }
+      const res = await provisionMonthlyBookingMeet(bookingId, accessToken);
+      setConfirmSuccessMessage(
+        res.alreadyProvisioned
+          ? 'La sala única de Google Meet de este abono quedó sincronizada en todas sus clases.'
+          : '¡Sala única de Google Meet generada y vinculada exclusivamente a este abono!'
+      );
+      await loadData();
+    } catch (err: any) {
+      console.warn('Aviso al provisionar sala Meet para abono:', err);
+      const parsed = classifyMeetProvisionError(err);
+      setMeetProvisionWarning({
+        bookingId,
+        message: parsed.message,
+        isUncertain: parsed.isUncertain,
+      });
+      await loadData();
+    } finally {
+      setProvisioningBookingIds((prev) => {
+        const next = { ...prev };
+        delete next[bookingId];
+        return next;
+      });
+    }
+  };
+
   return (
     <TeacherLayout activeSection="dashboard" onNavigate={onNavigate} onRefreshData={loadData}>
-      {/* Alerta flotante de éxito al confirmar pago */}
+      {/* Alerta flotante de éxito al confirmar pago o generar Meet */}
       {confirmSuccessMessage && (
         <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-2xl p-4 flex items-center justify-between gap-3 animate-in fade-in duration-200">
           <div className="flex items-center gap-2.5 text-xs sm:text-sm font-bold">
@@ -281,10 +413,48 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
           <button
             type="button"
             onClick={() => setConfirmSuccessMessage(null)}
-            className="text-emerald-700 hover:text-emerald-900 p-1"
+            className="text-emerald-700 hover:text-emerald-900 p-1 cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
+        </div>
+      )}
+
+      {/* Alerta no bloqueante si el pago quedó confirmado pero falló la generación de Meet */}
+      {meetProvisionWarning && (
+        <div
+          id="meet-provision-warning-banner"
+          className="bg-amber-50 border border-amber-200 text-amber-950 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in duration-200"
+        >
+          <div className="flex items-start gap-2.5 text-xs sm:text-sm font-semibold">
+            <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+            <span>{meetProvisionWarning.message}</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {!meetProvisionWarning.isUncertain && (
+              <button
+                type="button"
+                disabled={Boolean(provisioningBookingIds[meetProvisionWarning.bookingId])}
+                onClick={() => handleProvisionMeetForBooking(meetProvisionWarning.bookingId)}
+                className="px-3.5 py-2 rounded-xl bg-[#00537A] hover:bg-[#004262] text-white text-xs font-bold transition cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {provisioningBookingIds[meetProvisionWarning.bookingId] ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Video className="w-3.5 h-3.5" />
+                )}
+                <span>Reintentar sala Meet</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setMeetProvisionWarning(null)}
+              className="text-amber-700 hover:text-amber-900 p-1 cursor-pointer"
+              aria-label="Cerrar aviso"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -528,6 +698,101 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
             )}
           </div>
         )}
+        {/* RECUPERACIÓN DE ABONOS CONFIRMADOS SIN SALA GOOGLE MEET */}
+        {confirmedBookingsNeedingMeet.length > 0 && (
+          <div
+            id="confirmed-bookings-meet-recovery"
+            className="mt-4 bg-amber-50/70 border border-amber-200/90 rounded-[24px] p-5 space-y-3"
+          >
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
+                  <Video className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="font-parkinsans text-sm sm:text-base font-bold text-slate-900">
+                    Abonos confirmados pendientes de sala Google Meet ({confirmedBookingsNeedingMeet.length})
+                  </h4>
+                  <p className="text-xs text-slate-600">
+                    Generá una sala única de Google Meet para cada abono confirmado que todavía no tenga enlace asignado.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2.5">
+              {confirmedBookingsNeedingMeet.map((booking) => {
+                const bookingId = booking.id!;
+                const isBookingProvisioning = Boolean(provisioningBookingIds[bookingId]);
+                const isUncertain = booking.meetProvisioningStatus === 'uncertain';
+                const hasExistingBookingUrl = isValidMeetUrl(booking.meetUrl);
+                const studentName =
+                  booking.studentName ||
+                  students.find((s) => s.uid === booking.studentId)?.name ||
+                  'Alumno';
+                const schedules = getDistinctSchedulesSummary(booking);
+
+                return (
+                  <div
+                    key={bookingId}
+                    id={`recovery-booking-meet-${bookingId}`}
+                    className="bg-white rounded-2xl p-4 border border-amber-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  >
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-sm text-slate-900">{studentName}</span>
+                        <span className="text-xs font-semibold text-[#00537A] bg-[#E8F3F8] px-2.5 py-0.5 rounded-full">
+                          {formatBookingMonth(booking.month)}
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          {booking.totalLessons} clases
+                        </span>
+                        {isUncertain && (
+                          <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200">
+                            Estado incierto (reintento bloqueado)
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-500 truncate">{schedules}</p>
+                    </div>
+
+                    {isUncertain ? (
+                      <span className="text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 px-3 py-2 rounded-xl shrink-0">
+                        Revisión requerida por timeout previo
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        id={`btn-provision-meet-booking-${bookingId}`}
+                        disabled={isBookingProvisioning}
+                        onClick={() =>
+                          handleProvisionMeetForBooking(bookingId, hasExistingBookingUrl)
+                        }
+                        className="px-4 py-2.5 rounded-full bg-[#00537A] hover:bg-[#004262] active:scale-95 text-white font-bold text-xs sm:text-sm transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 shrink-0"
+                      >
+                        {isBookingProvisioning ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span>Generando sala...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Video className="w-4 h-4" />
+                            <span>
+                              {hasExistingBookingUrl
+                                ? 'Sincronizar sala en clases'
+                                : 'Generar sala Google Meet'}
+                            </span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* SECCIÓN 2: TUS PRÓXIMAS CLASES */}
@@ -655,9 +920,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
                     </div>
                   </div>
 
-                  {/* Lado Derecho: Acceso a la clase (Unirse a la clase y Aula virtual) */}
+                  {/* Lado Derecho: Acceso a la clase (Google Meet y Aula virtual) */}
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2.5 shrink-0 pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-100">
-                    {/* Botón "Unirse a la clase" (#00537A) o aviso si pago está pendiente */}
+                    {/* Botón Meet: Exclusivo para clases autorizadas/confirmadas con enlace válido */}
                     {isPendingPayment ? (
                       <button
                         type="button"
@@ -667,30 +932,77 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
                       >
                         Meet (Pendiente de pago)
                       </button>
-                    ) : (
+                    ) : canJoinLessonMeet(lesson) ? (
                       <a
                         id={`btn-join-lesson-${lesson.id}`}
-                        href={lesson.meetUrl || `/lesson/${lesson.id}`}
-                        target={lesson.meetUrl ? '_blank' : undefined}
-                        rel={lesson.meetUrl ? 'noopener noreferrer' : undefined}
-                        onClick={(e) => {
-                          if (!lesson.meetUrl) {
-                            e.preventDefault();
-                            onNavigate(`/lesson/${lesson.id}`);
-                          }
-                        }}
-                        className="bg-[#00537A] hover:bg-[#004262] active:scale-95 text-white font-semibold text-sm sm:text-base px-6 sm:px-7 py-2.5 rounded-full shadow-2xs transition-all cursor-pointer whitespace-nowrap text-center"
+                        href={lesson.meetUrl!.trim()}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="bg-[#00537A] hover:bg-[#004262] active:scale-95 text-white font-semibold text-sm sm:text-base px-6 sm:px-7 py-2.5 rounded-full shadow-2xs transition-all cursor-pointer whitespace-nowrap text-center flex items-center justify-center gap-2"
                       >
-                        Unirse a la clase
+                        <Video className="w-4 h-4 shrink-0" />
+                        <span>Unirse a la clase</span>
                       </a>
-                    )}
+                    ) : isConfirmedPayment && (lesson as any).monthlyBookingId ? (
+                      (() => {
+                        const bookingId = String((lesson as any).monthlyBookingId);
+                        const linkedBooking = bookingByIdMap.get(bookingId);
+                        const isUncertain = linkedBooking?.meetProvisioningStatus === 'uncertain';
+                        const isBookingProvisioning = Boolean(provisioningBookingIds[bookingId]);
+                        const bookingHasExistingUrl = isValidMeetUrl(linkedBooking?.meetUrl);
+
+                        if (isUncertain) {
+                          return (
+                            <span
+                              title="La solicitud previa a Google Meet quedó en estado incierto para evitar salas duplicadas"
+                              className="bg-rose-50 text-rose-700 border border-rose-200 font-semibold text-xs px-4 py-2.5 rounded-full whitespace-nowrap text-center"
+                            >
+                              Meet en revisión
+                            </span>
+                          );
+                        }
+
+                        return (
+                          <button
+                            id={`btn-provision-lesson-meet-${lesson.id}`}
+                            type="button"
+                            disabled={isBookingProvisioning}
+                            onClick={() =>
+                              handleProvisionMeetForBooking(bookingId, bookingHasExistingUrl)
+                            }
+                            className="bg-[#00537A] hover:bg-[#004262] active:scale-95 text-white font-semibold text-xs sm:text-sm px-5 py-2.5 rounded-full shadow-2xs transition-all cursor-pointer disabled:opacity-50 whitespace-nowrap text-center flex items-center justify-center gap-2"
+                          >
+                            {isBookingProvisioning ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                                <span>Generando Meet...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Video className="w-4 h-4 shrink-0" />
+                                <span>
+                                  {bookingHasExistingUrl
+                                    ? 'Sincronizar Meet'
+                                    : 'Generar sala Meet'}
+                                </span>
+                              </>
+                            )}
+                          </button>
+                        );
+                      })()
+                    ) : null}
 
                     {/* Botón Aula Virtual */}
                     <button
                       id={`btn-view-lesson-${lesson.id}`}
                       type="button"
                       onClick={() => onNavigate(`/lesson/${lesson.id}`)}
-                      className="bg-slate-100 hover:bg-slate-200 text-slate-800 active:scale-95 font-semibold text-sm sm:text-base px-5 sm:px-6 py-2.5 rounded-full shadow-2xs transition-all cursor-pointer whitespace-nowrap text-center flex items-center justify-center gap-1.5"
+                      className={`${
+                        canJoinLessonMeet(lesson) ||
+                        (isConfirmedPayment && Boolean((lesson as any).monthlyBookingId))
+                          ? 'bg-slate-100 hover:bg-slate-200 text-slate-800'
+                          : 'bg-[#00537A] hover:bg-[#004262] text-white'
+                      } active:scale-95 font-semibold text-sm sm:text-base px-5 sm:px-6 py-2.5 rounded-full shadow-2xs transition-all cursor-pointer whitespace-nowrap text-center flex items-center justify-center gap-1.5`}
                     >
                       <span>Aula virtual</span>
                       <ArrowRight className="w-4 h-4 shrink-0" />
@@ -786,8 +1098,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
                 .
               </p>
               <p className="text-[11px] text-amber-800 leading-relaxed pt-0.5">
-                Al confirmar, se asignará de manera inmediata y definitiva el enlace permanente de
-                Google Meet para las clases del alumno y se consolidará su lugar en la agenda.
+                Al confirmar, se consolidará el lugar del alumno en la agenda y luego podrás generar
+                la sala única de Google Meet exclusiva para este abono.
               </p>
             </div>
 
@@ -852,17 +1164,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
                 id="btn-modal-confirm-payment-submit"
                 disabled={isConfirming}
                 onClick={async () => {
-                  if (!selectedBookingForConfirm?.id) return;
+                  const bookingId = selectedBookingForConfirm?.id;
+                  if (!bookingId) return;
                   setIsConfirming(true);
                   setConfirmError(null);
+                  setMeetProvisionWarning(null);
+
+                  // 1. Confirmar el pago PRIMERO en el backend (siempre independiente de Google Meet)
                   try {
-                    await confirmMonthlyBookingPayment(selectedBookingForConfirm.id);
-                    setIsConfirmModalOpen(false);
-                    setSelectedBookingForConfirm(null);
-                    setConfirmSuccessMessage(
-                      '¡Pago confirmado exitosamente! Las clases del alumno quedaron activadas y su sala Google Meet está habilitada.'
-                    );
-                    await loadData();
+                    await confirmMonthlyBookingPayment(bookingId);
                   } catch (err: any) {
                     console.warn('Aviso al confirmar pago:', err);
                     const msg = err?.message || 'Error al confirmar la recepción del pago.';
@@ -873,8 +1183,44 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
                         ? 'No se pudo procesar la confirmación en el servidor. Por favor intentá nuevamente.'
                         : msg
                     );
-                  } finally {
                     setIsConfirming(false);
+                    return;
+                  }
+
+                  // Pago confirmado exitosamente: cerrar modal y actualizar vistas
+                  setIsConfirmModalOpen(false);
+                  setSelectedBookingForConfirm(null);
+                  setIsConfirming(false);
+
+                  // 2. Solicitar token OAuth y provisionar sala única de Google Meet para este abono
+                  setProvisioningBookingIds((prev) => ({ ...prev, [bookingId]: true }));
+                  try {
+                    const token = await getGoogleMeetAccessToken();
+                    await provisionMonthlyBookingMeet(bookingId, token);
+                    setConfirmSuccessMessage(
+                      '¡Pago confirmado exitosamente! Se generó una sala única de Google Meet exclusiva para todas las clases de este abono.'
+                    );
+                  } catch (meetErr: any) {
+                    console.warn(
+                      'Pago confirmado, pero no se pudo completar la generación de Google Meet:',
+                      meetErr
+                    );
+                    const parsed = classifyMeetProvisionError(meetErr);
+                    setConfirmSuccessMessage(
+                      '¡Pago confirmado exitosamente! Las clases del alumno quedaron habilitadas en tu agenda.'
+                    );
+                    setMeetProvisionWarning({
+                      bookingId,
+                      message: `El pago fue confirmado correctamente, pero quedó pendiente la sala Google Meet: ${parsed.message}`,
+                      isUncertain: parsed.isUncertain,
+                    });
+                  } finally {
+                    setProvisioningBookingIds((prev) => {
+                      const next = { ...prev };
+                      delete next[bookingId];
+                      return next;
+                    });
+                    await loadData();
                   }
                 }}
                 className="px-5 py-2.5 rounded-xl font-extrabold text-xs text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-all shadow-md disabled:opacity-50 flex items-center gap-2 cursor-pointer"

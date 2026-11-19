@@ -96,6 +96,20 @@ export interface MonthlyBooking {
   expiresAt?: any; // Fecha exacta de expiración (24 horas después de createdAt)
   confirmedAt?: any;
   expiredAt?: any;
+  meetUrl?: string | null;
+  meetSpaceName?: string | null;
+  meetProvisioningStatus?: 'idle' | 'creating' | 'ready' | 'uncertain' | 'failed';
+  meetLastError?: string | null;
+}
+
+export interface ProvisionMonthlyBookingMeetResult {
+  success: boolean;
+  bookingId: string;
+  meetUrl: string;
+  meetSpaceName: string | null;
+  updatedLessonsCount: number;
+  alreadyProvisioned: boolean;
+  message: string;
 }
 
 /**
