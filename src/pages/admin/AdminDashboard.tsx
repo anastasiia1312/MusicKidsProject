@@ -324,12 +324,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
             >
               Panel de Administración
             </h1>
-            <p
-              className="font-siemreap text-slate-500 text-sm sm:text-base"
-              style={{ fontFamily: "'Siemreap', sans-serif" }}
-            >
-              Consulta, filtra y gestiona el estado de activación de profesores y alumnos en MusicKids.
-            </p>
+           
           </div>
 
           {/* Botón de Actualizar / Refrescar */}
