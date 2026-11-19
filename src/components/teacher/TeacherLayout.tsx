@@ -12,7 +12,6 @@ import {
   Bell,
   Menu,
   ChevronDown,
-  RefreshCw,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { subscribeToUserSupportCount } from '../../services/supportService';
@@ -28,7 +27,6 @@ export const TeacherLayout: React.FC<TeacherLayoutProps> = ({
   children,
   activeSection,
   onNavigate,
-  onRefreshData,
 }) => {
   const { userProfile, user, logout } = useAuth();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -208,31 +206,6 @@ export const TeacherLayout: React.FC<TeacherLayoutProps> = ({
                     <User className="w-3.5 h-3.5 text-slate-400" />
                     Mi perfil
                   </button>
-                  <button
-                    type="button"
-                    id="dropdown-teacher-classes-link"
-                    onClick={() => {
-                      setProfileDropdownOpen(false);
-                      onNavigate('/teacher/availability');
-                    }}
-                    className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
-                  >
-                    <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                    Clases
-                  </button>
-                  {onRefreshData && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setProfileDropdownOpen(false);
-                        onRefreshData();
-                      }}
-                      className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5 text-slate-400" />
-                      Actualizar clases
-                    </button>
-                  )}
                   <button
                     type="button"
                     onClick={() => {

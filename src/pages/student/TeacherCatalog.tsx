@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  ArrowLeft,
   Music,
-  User,
   AlertCircle,
   Loader2,
   RefreshCw,
@@ -15,7 +13,7 @@ import {
   Filter,
   ChevronRight,
 } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
+import { StudentLayout } from '../../components/student/StudentLayout';
 import {
   getActiveTeachers,
   getInstrumentLabel,
@@ -27,8 +25,6 @@ interface TeacherCatalogProps {
 }
 
 export const TeacherCatalog: React.FC<TeacherCatalogProps> = ({ onNavigate }) => {
-  const { userProfile } = useAuth();
-
   const [teachers, setTeachers] = useState<PublicTeacherCard[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -144,86 +140,8 @@ export const TeacherCatalog: React.FC<TeacherCatalogProps> = ({ onNavigate }) =>
   };
 
   return (
-    <div
-      id="teacher-catalog-container"
-      className="min-h-screen bg-[#F0F4F8] flex flex-col justify-between relative overflow-x-hidden selection:bg-[#FFB800]/30 selection:text-[#00537A]"
-    >
-      {/* Elementos ambientales decorativos de fondo (Identidad MusicKids) */}
-      <div className="absolute inset-0 pointer-events-none select-none overflow-hidden z-0">
-        <div className="absolute -top-24 -right-24 w-96 h-96 bg-[#D7E6F1]/50 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-24 -left-24 w-80 h-80 sm:w-96 sm:h-96 bg-[#FFE29A]/30 rounded-full blur-3xl pointer-events-none" />
-        <svg
-          className="absolute bottom-0 left-0 w-80 h-80 sm:w-96 sm:h-96 opacity-75 pointer-events-none"
-          viewBox="0 0 400 400"
-          fill="none"
-        >
-          <path
-            d="M -50 350 C 50 380, 100 300, 120 280 C 160 240, 80 180, 110 140 C 130 110, 180 130, 210 90"
-            stroke="#FAB816"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-          />
-        </svg>
-      </div>
-
-      {/* HEADER SUPERIOR */}
-      <header
-        id="teacher-catalog-header"
-        className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-4 flex items-center justify-between relative z-20"
-      >
-        {/* Brand & Botón volver */}
-        <div className="flex items-center gap-3 sm:gap-6">
-          <div
-            id="navbar-brand"
-            className="flex items-center gap-1 cursor-pointer group select-none"
-            onClick={() => onNavigate('/student/dashboard')}
-            title="Ir al Panel del Alumno"
-          >
-            <span
-              className="font-abril text-[26px] sm:text-[30px] text-[#00537A] tracking-normal leading-none"
-              style={{ fontFamily: "'Abril Fatface', cursive, serif" }}
-            >
-              Music
-            </span>
-            <img
-              src="/images/logo-clef.png"
-              alt="Clave de Sol MusicKids"
-              className="h-8 sm:h-10 w-auto object-contain -mx-0.5 -mt-1 select-none pointer-events-none transition-transform duration-200 group-hover:scale-105"
-              referrerPolicy="no-referrer"
-            />
-            <span
-              className="font-abril text-[26px] sm:text-[30px] text-[#00537A] tracking-normal leading-none"
-              style={{ fontFamily: "'Abril Fatface', cursive, serif" }}
-            >
-              Kids
-            </span>
-          </div>
-
-          <button
-            type="button"
-            id="btn-back-to-dashboard"
-            onClick={() => onNavigate('/student/dashboard')}
-            className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white hover:bg-slate-50 text-slate-700 hover:text-[#00537A] text-xs sm:text-sm font-semibold border border-slate-200/90 shadow-2xs transition-all cursor-pointer"
-          >
-            <ArrowLeft className="w-4 h-4 text-slate-500" />
-            <span className="hidden xs:inline">Volver al Panel</span>
-            <span className="xs:hidden">Volver</span>
-          </button>
-        </div>
-
-        {/* Perfil del alumno en cápsula */}
-        <div className="flex items-center gap-2 bg-white border border-slate-200/90 rounded-full px-3.5 py-1.5 shadow-2xs select-none">
-          <div className="w-6 h-6 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
-            <User className="w-3.5 h-3.5" />
-          </div>
-          <span className="text-xs sm:text-sm font-semibold text-slate-800 max-w-[120px] sm:max-w-[180px] truncate">
-            {userProfile?.name || 'Alumno'}
-          </span>
-        </div>
-      </header>
-
-      {/* CONTENIDO PRINCIPAL */}
-      <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 relative z-10">
+    <StudentLayout activeSection="teachers" onNavigate={onNavigate}>
+      <div id="teacher-catalog-container" className="w-full pb-8">
         {/* Cabecera del Catálogo */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
@@ -468,7 +386,7 @@ export const TeacherCatalog: React.FC<TeacherCatalogProps> = ({ onNavigate }) =>
 
             <div
               id="teachers-grid"
-              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+              className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6"
             >
               {filteredTeachers.map((teacher) => (
                 <div
@@ -608,12 +526,7 @@ export const TeacherCatalog: React.FC<TeacherCatalogProps> = ({ onNavigate }) =>
             </div>
           </div>
         )}
-      </main>
-
-      {/* FOOTER */}
-      <footer className="w-full py-6 text-center text-xs text-slate-400 select-none">
-        MusicKids — Catálogo oficial de profesores particulares
-      </footer>
-    </div>
+      </div>
+    </StudentLayout>
   );
 };

@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
   Home,
-  Calendar,
   FileText,
   Folder,
   LogOut,
@@ -9,7 +8,6 @@ import {
   Bell,
   Menu,
   ChevronDown,
-  RefreshCw,
   Compass,
   Headphones,
   BookOpen,
@@ -28,7 +26,6 @@ export const StudentLayout: React.FC<StudentLayoutProps> = ({
   children,
   activeSection,
   onNavigate,
-  onRefreshData,
 }) => {
   const { userProfile, user, logout } = useAuth();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -172,19 +169,6 @@ export const StudentLayout: React.FC<StudentLayoutProps> = ({
                   <User className="w-3.5 h-3.5 text-slate-400" />
                   Mi perfil
                 </button>
-                {onRefreshData && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setProfileDropdownOpen(false);
-                      onRefreshData();
-                    }}
-                    className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5 text-slate-400" />
-                    Actualizar
-                  </button>
-                )}
                 <button
                   type="button"
                   onClick={handleLogout}
@@ -234,30 +218,7 @@ export const StudentLayout: React.FC<StudentLayoutProps> = ({
               {!isSidebarCollapsed && <span>Panel</span>}
             </button>
 
-            {/* 2. Mis Clases */}
-            <button
-              type="button"
-              id="sidebar-item-clases"
-              title="Mis Clases"
-              aria-label="Mis Clases"
-              onClick={() => onNavigate('/student/dashboard')}
-              className={`w-full flex items-center ${
-                isSidebarCollapsed ? 'justify-center p-3' : 'gap-3.5 px-4 py-3'
-              } rounded-2xl ${
-                activeSection === 'classes'
-                  ? 'bg-[#E8F3F8] text-[#00537A] font-bold'
-                  : 'text-slate-700 hover:bg-slate-50 hover:text-[#00537A] font-semibold'
-              } text-sm cursor-pointer transition-colors text-left`}
-            >
-              <Calendar
-                className={`w-5 h-5 ${
-                  activeSection === 'classes' ? 'text-[#00537A]' : 'text-slate-500'
-                } shrink-0`}
-              />
-              {!isSidebarCollapsed && <span>Mis Clases</span>}
-            </button>
-
-            {/* 3. Buscar profesores */}
+            {/* 2. Buscar profesores */}
             <button
               type="button"
               id="sidebar-item-buscar-profesores"

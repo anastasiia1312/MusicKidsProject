@@ -1,44 +1,32 @@
 import { Timestamp } from 'firebase/firestore';
+import {
+  parseLessonTimestampMs,
+  formatDateInBuenosAires,
+  formatTimeInBuenosAires,
+} from './meetValidation';
 
 /**
  * Convierte un Timestamp o Date a fecha formateada en formato Argentina (DD/MM/AAAA)
+ * respetando America/Argentina/Buenos_Aires.
  */
 export function formatLessonDate(timestamp: Timestamp | Date | any): string {
-  if (!timestamp) return '--/--/----';
-  
-  const dateObj = timestamp instanceof Timestamp 
-    ? timestamp.toDate() 
-    : (timestamp instanceof Date ? timestamp : new Date(timestamp));
-
-  if (isNaN(dateObj.getTime())) return '--/--/----';
-
-  const day = String(dateObj.getDate()).padStart(2, '0');
-  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-  const year = dateObj.getFullYear();
-
-  return `${day}/${month}/${year}`;
+  const ms = parseLessonTimestampMs(timestamp);
+  if (ms === null) return '--/--/----';
+  return formatDateInBuenosAires(ms);
 }
 
 /**
  * Convierte un Timestamp o Date a hora formateada (HH:mm)
+ * respetando America/Argentina/Buenos_Aires.
  */
 export function formatLessonTime(timestamp: Timestamp | Date | any): string {
-  if (!timestamp) return '--:--';
-
-  const dateObj = timestamp instanceof Timestamp 
-    ? timestamp.toDate() 
-    : (timestamp instanceof Date ? timestamp : new Date(timestamp));
-
-  if (isNaN(dateObj.getTime())) return '--:--';
-
-  const hours = String(dateObj.getHours()).padStart(2, '0');
-  const minutes = String(dateObj.getMinutes()).padStart(2, '0');
-
-  return `${hours}:${minutes}`;
+  const ms = parseLessonTimestampMs(timestamp);
+  if (ms === null) return '--:--';
+  return formatTimeInBuenosAires(ms);
 }
 
 /**
- * Formatea fecha y hora combinadas (DD/MM/AAAA - HH:mm)
+ * Formatea fecha y hora combinadas (DD/MM/AAAA - HH:mm) en America/Argentina/Buenos_Aires
  */
 export function formatLessonDateTime(timestamp: Timestamp | Date | any): string {
   return `${formatLessonDate(timestamp)} - ${formatLessonTime(timestamp)}`;
@@ -74,6 +62,8 @@ export function getLessonStatusLabel(status: string): string {
       return 'Completada';
     case 'cancelled':
       return 'Cancelada';
+    case 'expired':
+      return 'Expirada';
     default:
       return 'Programada';
   }

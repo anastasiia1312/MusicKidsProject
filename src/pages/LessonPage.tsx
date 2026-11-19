@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Music,
   ArrowLeft,
@@ -30,9 +30,13 @@ import { getLessonById } from '../services/lessonService';
 import {
   formatLessonDate,
   formatLessonTime,
-  getLessonStatusLabel,
 } from '../utils/dateUtils';
-import { canJoinLessonMeet } from '../utils/meetValidation';
+import {
+  evaluateLessonMeetAccess,
+  getLessonTemporalState,
+  resolveLessonDurationMinutes,
+} from '../utils/meetValidation';
+import { useLessonTimeTick } from '../hooks/useLessonTimeTick';
 import type { Lesson } from '../types/lesson';
 
 interface LessonPageProps {
@@ -50,6 +54,17 @@ export const LessonPage: React.FC<LessonPageProps> = ({ lessonId, onNavigate }) 
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [activeMainTool, setActiveMainTool] = useState<'whiteboard' | 'piano'>('whiteboard');
+
+  const lessonTickList = useMemo(() => (lesson ? [lesson] : []), [lesson]);
+  const nowMs = useLessonTimeTick(lessonTickList);
+  const meetAccess = useMemo(
+    () => evaluateLessonMeetAccess(lesson, nowMs),
+    [lesson, nowMs]
+  );
+  const temporalState = useMemo(
+    () => (lesson ? getLessonTemporalState(lesson, nowMs) : null),
+    [lesson, nowMs]
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -216,24 +231,45 @@ export const LessonPage: React.FC<LessonPageProps> = ({ lessonId, onNavigate }) 
 
         {/* Lado derecho: Botón Google Meet + Notificaciones + Perfil */}
         <div className="flex items-center gap-2.5 sm:gap-4 shrink-0">
-          {/* Botón Abrir GoogleMeet */}
-          {canJoinLessonMeet(lesson) ? (
+          {/* Botón Unirse a Meet (habilitado automáticamente al horario exacto de inicio) */}
+          {meetAccess.canJoin && meetAccess.meetUrl ? (
             <a
               id="btn-open-lesson-meet"
-              href={lesson!.meetUrl!.trim()}
+              href={meetAccess.meetUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-full bg-white hover:bg-slate-50 border border-slate-200/90 text-xs sm:text-sm font-semibold text-slate-800 shadow-2xs transition cursor-pointer"
+              className="flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-full bg-[#00537A] hover:bg-[#004262] border border-[#00537A] text-xs sm:text-sm font-semibold text-white shadow-2xs transition cursor-pointer"
             >
-              <Video className="w-4 h-4 text-slate-700" />
-              <span className="hidden sm:inline">Abrir GoogleMeet</span>
+              <Video className="w-4 h-4 text-white" />
+              <span className="hidden sm:inline">Unirse a Meet</span>
             </a>
+          ) : meetAccess.reason === 'before_start' ? (
+            <div className="flex flex-col items-end gap-0.5">
+              <button
+                id="btn-open-lesson-meet"
+                type="button"
+                disabled
+                aria-disabled="true"
+                title={meetAccess.availabilityMessage || undefined}
+                className="flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-full bg-slate-200 border border-slate-300/80 text-xs sm:text-sm font-semibold text-slate-500 cursor-not-allowed"
+              >
+                <Video className="w-4 h-4 text-slate-400" />
+                <span className="hidden sm:inline">Unirse a Meet</span>
+              </button>
+              {meetAccess.availabilityMessage && (
+                <span className="text-[11px] font-semibold text-slate-500">
+                  {meetAccess.availabilityMessage}
+                </span>
+              )}
+            </div>
           ) : (
             <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-100 text-slate-500 text-xs font-semibold">
               <Video className="w-3.5 h-3.5" />
               <span>
-                {(lesson as any)?.paymentStatus === 'pending_confirmation'
+                {meetAccess.reason === 'pending_payment'
                   ? 'Meet pendiente de pago'
+                  : meetAccess.reason === 'cancelled'
+                  ? 'Clase cancelada'
                   : 'Meet sin asignar'}
               </span>
             </div>
@@ -574,29 +610,58 @@ export const LessonPage: React.FC<LessonPageProps> = ({ lessonId, onNavigate }) 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <span className="text-slate-400 font-medium block">Duración</span>
-                  <p className="font-semibold text-slate-800">{lesson.duration} minutos</p>
+                  <p className="font-semibold text-slate-800">
+                    {resolveLessonDurationMinutes(lesson)} minutos
+                  </p>
                 </div>
                 <div>
                   <span className="text-slate-400 font-medium block">Estado</span>
-                  <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full inline-block mt-0.5">
-                    {getLessonStatusLabel(lesson.status)}
+                  <span
+                    className={`font-bold px-2.5 py-0.5 rounded-full inline-block mt-0.5 ${
+                      temporalState?.phase === 'in_progress'
+                        ? 'text-emerald-800 bg-emerald-100'
+                        : temporalState?.phase === 'past'
+                        ? 'text-slate-600 bg-slate-100'
+                        : temporalState?.phase === 'cancelled'
+                        ? 'text-rose-800 bg-rose-100'
+                        : 'text-[#7A5A00] bg-[#FFEAA7]'
+                    }`}
+                  >
+                    {temporalState?.label || 'Próxima clase'}
                   </span>
                 </div>
               </div>
-              {canJoinLessonMeet(lesson) && (
+              {meetAccess.canJoin && meetAccess.meetUrl ? (
                 <div className="pt-2">
                   <a
-                    href={lesson.meetUrl!.trim()}
+                    href={meetAccess.meetUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-2 w-full py-2 bg-[#4361EE] hover:bg-indigo-600 text-white font-bold rounded-2xl transition cursor-pointer"
+                    className="flex items-center justify-center gap-2 w-full py-2.5 bg-[#00537A] hover:bg-[#004262] text-white font-bold rounded-2xl transition cursor-pointer"
                   >
                     <Video className="w-4 h-4" />
-                    <span>Unirse a Google Meet</span>
+                    <span>Unirse a Meet</span>
                     <ExternalLink className="w-3.5 h-3.5" />
                   </a>
                 </div>
-              )}
+              ) : meetAccess.reason === 'before_start' ? (
+                <div className="pt-2 space-y-1.5">
+                  <button
+                    type="button"
+                    disabled
+                    aria-disabled="true"
+                    className="flex items-center justify-center gap-2 w-full py-2.5 bg-slate-200 text-slate-500 font-bold rounded-2xl cursor-not-allowed"
+                  >
+                    <Video className="w-4 h-4" />
+                    <span>Unirse a Meet</span>
+                  </button>
+                  {meetAccess.availabilityMessage && (
+                    <p className="text-xs font-semibold text-slate-500 text-center">
+                      {meetAccess.availabilityMessage}
+                    </p>
+                  )}
+                </div>
+              ) : null}
             </div>
           </div>
         </div>

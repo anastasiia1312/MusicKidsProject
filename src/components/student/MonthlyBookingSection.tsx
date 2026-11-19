@@ -18,7 +18,7 @@ import type { TeacherRecurringSlot } from '../../types/recurringSchedule';
 import type { TeacherScheduleException } from '../../types/scheduleException';
 import type { TeacherAvailability } from '../../types/availability';
 import type { MonthlyPlan } from '../../types/auth';
-import { getTeacherRecurringSlots } from '../../services/recurringScheduleService';
+import { getTeacherRecurringSlots, timeToMinutes } from '../../services/recurringScheduleService';
 import { getTeacherScheduleExceptions } from '../../services/teacherScheduleExceptionService';
 import { getTeacherAvailability } from '../../services/availabilityService';
 import { fetchUserProfile } from '../../services/authService';
@@ -26,6 +26,9 @@ import {
   getAvailableMonthOptions,
   calculateMonthlyOccurrences,
   checkSelectedRulesOverlap,
+  filterAvailableRecurringSlotsForMonth,
+  doesRuleOverlapWithAny,
+  getMaxNonOverlappingSlotCount,
   getFixedMonthlyRateForFrequency,
   formatExpirationBuenosAires,
   type FixedMonthlyRateResult,
@@ -80,7 +83,9 @@ export const MonthlyBookingSection: React.FC<MonthlyBookingSectionProps> = ({
   const [exceptions, setExceptions] = useState<TeacherScheduleException[]>([]);
   const [availabilitySlots, setAvailabilitySlots] = useState<TeacherAvailability[]>([]);
   const [slotLocks, setSlotLocks] = useState<TeacherSlotLock[]>([]);
+  const [publicBlockedDates, setPublicBlockedDates] = useState<string[]>([]);
   const [monthlyPlans, setMonthlyPlans] = useState<MonthlyPlan[]>(monthlyPlansProp || []);
+  const [availabilityNotice, setAvailabilityNotice] = useState<string | null>(null);
 
   // Contexto de autenticación
   const { user, role } = useAuth();
@@ -93,6 +98,7 @@ export const MonthlyBookingSection: React.FC<MonthlyBookingSectionProps> = ({
 
   // Clave de idempotencia estable por intento de reserva
   const bookingKeyRef = useRef<string | null>(null);
+  const loadRequestIdRef = useRef<number>(0);
 
   // Sincronizar planes si las props cambian
   useEffect(() => {
@@ -104,6 +110,8 @@ export const MonthlyBookingSection: React.FC<MonthlyBookingSectionProps> = ({
   // Cargar datos necesarios del profesor
   const loadData = async () => {
     if (!teacherId) return;
+
+    const currentRequestId = ++loadRequestIdRef.current;
 
     try {
       setLoading(true);
@@ -131,23 +139,33 @@ export const MonthlyBookingSection: React.FC<MonthlyBookingSectionProps> = ({
       const queryMonth =
         selectedMonthOption.monthKey ||
         `${selectedMonthOption.year}-${String(selectedMonthOption.month).padStart(2, '0')}`;
-      const locksPromise = getTeacherPublicAvailability(teacherId, queryMonth)
+      const publicAvailabilityPromise = getTeacherPublicAvailability(teacherId, queryMonth)
         .then((res) => {
-          return (res.occupiedIntervals || []).map((slot) => ({
-            teacherId,
-            date: slot.date,
-            startTime: slot.startTime,
-            endTime: slot.endTime,
-            duration: 45,
-            bookingType: 'monthly' as const,
-            bookingId: 'occupied',
-            studentId: 'occupied',
-            createdAt: null,
-          }));
+          const locks: TeacherSlotLock[] = (res.occupiedIntervals || []).map((slot) => {
+            const startMins = timeToMinutes(slot.startTime);
+            const endMins = slot.endTime ? timeToMinutes(slot.endTime) : startMins + 45;
+            const computedDuration = endMins > startMins ? endMins - startMins : 45;
+
+            return {
+              teacherId,
+              date: slot.date,
+              startTime: slot.startTime,
+              endTime: slot.endTime,
+              duration: computedDuration,
+              bookingType: 'monthly' as const,
+              bookingId: 'occupied',
+              studentId: 'occupied',
+              createdAt: null,
+            };
+          });
+          return {
+            locks,
+            blockedDates: Array.isArray(res.blockedDates) ? res.blockedDates : [],
+          };
         })
         .catch((err) => {
           console.warn('Advertencia al consultar disponibilidad sanitizada:', err);
-          return [] as TeacherSlotLock[];
+          return { locks: [] as TeacherSlotLock[], blockedDates: [] as string[] };
         });
 
       // 5. Si no se recibieron planes mensuales por props, cargarlos del perfil
@@ -163,25 +181,30 @@ export const MonthlyBookingSection: React.FC<MonthlyBookingSectionProps> = ({
         fetchedRecurring,
         fetchedExceptions,
         fetchedAvailability,
-        fetchedLocks,
+        fetchedPublicAvailability,
         fetchedProfile,
       ] = await Promise.all([
         recurringPromise,
         exceptionsPromise,
         availabilityPromise,
-        locksPromise,
+        publicAvailabilityPromise,
         profilePromise,
       ]);
+
+      // Ignorar respuestas obsoletas si el alumno cambió de mes mientras se cargaba
+      if (currentRequestId !== loadRequestIdRef.current) return;
 
       setRecurringSlots(fetchedRecurring);
       setExceptions(fetchedExceptions);
       setAvailabilitySlots(fetchedAvailability);
-      setSlotLocks(fetchedLocks);
+      setSlotLocks(fetchedPublicAvailability.locks);
+      setPublicBlockedDates(fetchedPublicAvailability.blockedDates);
 
       if (fetchedProfile && Array.isArray(fetchedProfile.monthlyPlans)) {
         setMonthlyPlans(fetchedProfile.monthlyPlans);
       }
     } catch (err: any) {
+      if (currentRequestId !== loadRequestIdRef.current) return;
       const msg = err?.message || String(err);
       if (msg.includes('permission-denied') || msg.includes('insufficient permissions')) {
         setLoadError('Permiso denegado al consultar la disponibilidad recurrente del profesor.');
@@ -189,13 +212,50 @@ export const MonthlyBookingSection: React.FC<MonthlyBookingSectionProps> = ({
         setLoadError('No se pudo cargar la configuración de horarios del profesor en este momento.');
       }
     } finally {
-      setLoading(false);
+      if (currentRequestId === loadRequestIdRef.current) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
     loadData();
   }, [teacherId, monthlyPlansProp, selectedMonthOption.monthKey]);
+
+  // Filtrar estrictamente los horarios recurrentes realmente disponibles para todo el mes seleccionado
+  const availableRecurringSlots = useMemo(() => {
+    return filterAvailableRecurringSlotsForMonth({
+      year: selectedMonthOption.year,
+      month: selectedMonthOption.month,
+      recurringSlots,
+      exceptions,
+      availabilitySlots,
+      activeLocks: slotLocks,
+      blockedDates: publicBlockedDates,
+    });
+  }, [
+    selectedMonthOption.year,
+    selectedMonthOption.month,
+    recurringSlots,
+    exceptions,
+    availabilitySlots,
+    slotLocks,
+    publicBlockedDates,
+  ]);
+
+  // Cantidad máxima de horarios sin superposición disponibles para el mes seleccionado
+  const maxSelectableFrequency = useMemo(() => {
+    return getMaxNonOverlappingSlotCount(availableRecurringSlots);
+  }, [availableRecurringSlots]);
+
+  // Limpiar automáticamente selecciones que dejaron de estar disponibles al cambiar de mes o refrescar
+  useEffect(() => {
+    const validIds = new Set(availableRecurringSlots.map((r) => r.id).filter(Boolean));
+    setSelectedRuleIds((prev) => {
+      const next = prev.filter((id) => validIds.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [availableRecurringSlots]);
 
   // Tarifa fija para la frecuencia semanal actualmente seleccionada (SUBBLOQUE 6B.2)
   const currentFixedRate: FixedMonthlyRateResult = useMemo(() => {
@@ -213,35 +273,48 @@ export const MonthlyBookingSection: React.FC<MonthlyBookingSectionProps> = ({
 
   // Limpiar selección de horarios si cambia la frecuencia objetivo
   const handleFrequencyChange = (freq: number) => {
+    bookingKeyRef.current = null;
+    setAvailabilityNotice(null);
     setTargetFrequency(freq);
     setSelectedRuleIds((prev) => prev.slice(0, freq));
   };
 
-  // Reglas seleccionadas completas
+  // Reglas seleccionadas completas (estrictamente desde los horarios disponibles del mes)
   const selectedRules = useMemo(() => {
-    return recurringSlots.filter((r) => r.id && selectedRuleIds.includes(r.id));
-  }, [recurringSlots, selectedRuleIds]);
+    return availableRecurringSlots.filter((r) => r.id && selectedRuleIds.includes(r.id));
+  }, [availableRecurringSlots, selectedRuleIds]);
 
   // Validación de superposición entre las reglas seleccionadas
   const overlapCheck = useMemo(() => {
     return checkSelectedRulesOverlap(selectedRules);
   }, [selectedRules]);
 
-  // Manejador para alternar la selección de una regla
+  // Manejador para alternar la selección de una regla disponible sin permitir superposiciones
   const toggleRuleSelection = (ruleId: string) => {
     if (!ruleId) return;
+
+    const candidate = availableRecurringSlots.find((r) => r.id === ruleId);
+    if (!candidate) return;
+
+    bookingKeyRef.current = null;
+    setAvailabilityNotice(null);
 
     setSelectedRuleIds((prev) => {
       if (prev.includes(ruleId)) {
         return prev.filter((id) => id !== ruleId);
       }
 
-      if (prev.length >= targetFrequency) {
-        // Reemplazar la última selección o mantener el límite
-        return [...prev.slice(0, targetFrequency - 1), ruleId];
+      const nextIds =
+        prev.length >= targetFrequency
+          ? [...prev.slice(0, targetFrequency - 1), ruleId]
+          : [...prev, ruleId];
+
+      const nextRules = availableRecurringSlots.filter((r) => r.id && nextIds.includes(r.id));
+      if (checkSelectedRulesOverlap(nextRules).hasOverlap) {
+        return prev;
       }
 
-      return [...prev, ruleId];
+      return nextIds;
     });
   };
 
@@ -256,6 +329,7 @@ export const MonthlyBookingSection: React.FC<MonthlyBookingSectionProps> = ({
       exceptions,
       availabilitySlots,
       activeLocks: slotLocks,
+      blockedDates: publicBlockedDates,
       targetClassesPerWeek: targetFrequency,
     });
   }, [
@@ -264,6 +338,7 @@ export const MonthlyBookingSection: React.FC<MonthlyBookingSectionProps> = ({
     exceptions,
     availabilitySlots,
     slotLocks,
+    publicBlockedDates,
     targetFrequency,
   ]);
 
@@ -357,10 +432,10 @@ export const MonthlyBookingSection: React.FC<MonthlyBookingSectionProps> = ({
         <div className="p-8 rounded-2xl bg-slate-50 border border-slate-200/80 text-center space-y-2">
           <Calendar className="w-8 h-8 text-slate-400 mx-auto" />
           <h3 className="text-base font-bold text-slate-800">
-            {teacherName} aún no ha publicado horarios recurrentes fijos
+            No hay horarios disponibles para el mes seleccionado
           </h3>
           <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto">
-            Podés consultar los horarios extraordinarios puntuales disponibles más arriba o contactar al profesor para acordar un horario.
+            {teacherName} aún no tiene horarios recurrentes activos para reservar en este período.
           </p>
         </div>
       ) : (
@@ -378,7 +453,11 @@ export const MonthlyBookingSection: React.FC<MonthlyBookingSectionProps> = ({
                   <button
                     key={`${opt.year}-${opt.month}`}
                     type="button"
-                    onClick={() => setSelectedMonthOption(opt)}
+                    onClick={() => {
+                      bookingKeyRef.current = null;
+                      setAvailabilityNotice(null);
+                      setSelectedMonthOption(opt);
+                    }}
                     className={`py-2.5 px-3 rounded-2xl text-xs font-bold transition-all border text-center cursor-pointer ${
                       isSelected
                         ? 'bg-[#00537A] text-white border-[#00537A] shadow-xs'
@@ -515,18 +594,35 @@ export const MonthlyBookingSection: React.FC<MonthlyBookingSectionProps> = ({
             </div>
           </div>
 
-          {/* PASO 3: Selección de Horarios Recurrentes del Profesor */}
+          {/* PASO 3: Selección de Horarios Recurrentes Disponibles del Profesor */}
           <div className="space-y-3">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <label className="text-xs font-bold uppercase tracking-wider text-slate-700 block">
                 3. Elegí los horarios fijos del profesor ({selectedRuleIds.length}/{targetFrequency})
               </label>
-              {selectedRuleIds.length < targetFrequency && (
+              {availableRecurringSlots.length > 0 && selectedRuleIds.length < targetFrequency && (
                 <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-0.5 font-bold">
                   Faltan elegir {targetFrequency - selectedRuleIds.length} horario(s)
                 </span>
               )}
             </div>
+
+            {availabilityNotice && (
+              <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-medium flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <span>{availabilityNotice}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAvailabilityNotice(null)}
+                  className="text-amber-700 hover:text-amber-900 p-0.5 rounded-lg cursor-pointer"
+                  aria-label="Cerrar aviso"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
 
             {overlapCheck.hasOverlap && (
               <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-medium flex items-start gap-2">
@@ -535,60 +631,107 @@ export const MonthlyBookingSection: React.FC<MonthlyBookingSectionProps> = ({
               </div>
             )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-              {recurringSlots.map((rule) => {
-                const isSelected = selectedRuleIds.includes(rule.id || '');
-                const dayName = DAY_LABELS[rule.dayOfWeek] || `Día ${rule.dayOfWeek}`;
+            {availableRecurringSlots.length === 0 ? (
+              <div
+                id="no-available-slots-for-month"
+                className="p-7 rounded-2xl bg-slate-50 border border-slate-200/80 text-center space-y-1.5"
+              >
+                <Calendar className="w-7 h-7 text-slate-400 mx-auto" />
+                <p className="text-sm font-bold text-slate-800">
+                  No hay horarios disponibles para el mes seleccionado
+                </p>
+                <p className="text-xs text-slate-500">
+                  Probá eligiendo otro mes disponible más arriba para ver los horarios habilitados.
+                </p>
+              </div>
+            ) : (
+              <>
+                {maxSelectableFrequency < targetFrequency && (
+                  <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-medium flex items-start gap-2">
+                    <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <span>
+                      Para {selectedMonthOption.label} hay {maxSelectableFrequency}{' '}
+                      {maxSelectableFrequency === 1
+                        ? 'horario disponible sin superposición'
+                        : 'horarios disponibles sin superposición'}
+                      . Podés cambiar la frecuencia semanal o seleccionar otro mes.
+                    </span>
+                  </div>
+                )}
 
-                return (
-                  <button
-                    key={rule.id}
-                    type="button"
-                    onClick={() => toggleRuleSelection(rule.id || '')}
-                    className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex items-center justify-between gap-3 ${
-                      isSelected
-                        ? 'bg-[#00537A] text-white border-[#00537A] shadow-xs'
-                        : 'bg-slate-50/60 hover:bg-slate-100/80 border-slate-200 text-slate-800'
-                    }`}
-                  >
-                    <div className="space-y-0.5">
-                      <span
-                        className={`text-xs font-bold uppercase tracking-wide block ${
-                          isSelected ? 'text-white/80' : 'text-slate-500'
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                  {availableRecurringSlots.map((rule) => {
+                    const isSelected = selectedRuleIds.includes(rule.id || '');
+                    const dayName = DAY_LABELS[rule.dayOfWeek] || `Día ${rule.dayOfWeek}`;
+
+                    // Comprobar si elegir este horario generaría superposición con otra regla ya elegida
+                    const keptSelectedRules =
+                      selectedRuleIds.length >= targetFrequency
+                        ? selectedRules.slice(0, targetFrequency - 1)
+                        : selectedRules;
+                    const overlapsSelected =
+                      !isSelected &&
+                      targetFrequency > 1 &&
+                      doesRuleOverlapWithAny(rule, keptSelectedRules);
+
+                    return (
+                      <button
+                        key={rule.id}
+                        type="button"
+                        disabled={overlapsSelected}
+                        onClick={() => toggleRuleSelection(rule.id || '')}
+                        className={`p-3.5 rounded-2xl border text-left transition-all flex items-center justify-between gap-3 ${
+                          isSelected
+                            ? 'bg-[#00537A] text-white border-[#00537A] shadow-xs cursor-pointer'
+                            : overlapsSelected
+                            ? 'bg-slate-100/70 border-slate-200 text-slate-400 opacity-60 cursor-not-allowed'
+                            : 'bg-slate-50/60 hover:bg-slate-100/80 border-slate-200 text-slate-800 cursor-pointer'
                         }`}
                       >
-                        Todos los {dayName}
-                      </span>
-                      <span className="text-sm sm:text-base font-extrabold tracking-tight block">
-                        {rule.startTime} - {rule.endTime}
-                      </span>
-                      <span
-                        className={`text-[11px] font-semibold block ${
-                          isSelected ? 'text-white/80' : 'text-slate-400'
-                        }`}
-                      >
-                        Duración: {rule.duration} min
-                        {rule.originDate && ` • Válido desde ${rule.originDate}`}
-                      </span>
-                    </div>
+                        <div className="space-y-0.5">
+                          <span
+                            className={`text-xs font-bold uppercase tracking-wide block ${
+                              isSelected ? 'text-white/80' : 'text-slate-500'
+                            }`}
+                          >
+                            Todos los {dayName}
+                          </span>
+                          <span className="text-sm sm:text-base font-extrabold tracking-tight block">
+                            {rule.startTime} - {rule.endTime}
+                          </span>
+                          <span
+                            className={`text-[11px] font-semibold block ${
+                              isSelected ? 'text-white/80' : 'text-slate-400'
+                            }`}
+                          >
+                            Duración: {rule.duration} min
+                            {overlapsSelected
+                              ? ' • Se superpone con tu selección'
+                              : rule.originDate
+                              ? ` • Válido desde ${rule.originDate}`
+                              : ''}
+                          </span>
+                        </div>
 
-                    <div
-                      className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 border transition-all ${
-                        isSelected
-                          ? 'bg-white text-[#00537A] border-white'
-                          : 'border-slate-300 text-transparent'
-                      }`}
-                    >
-                      <CheckCircle2 className="w-4 h-4 fill-current" />
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+                        <div
+                          className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 border transition-all ${
+                            isSelected
+                              ? 'bg-white text-[#00537A] border-white'
+                              : 'border-slate-300 text-transparent'
+                          }`}
+                        >
+                          <CheckCircle2 className="w-4 h-4 fill-current" />
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </div>
 
           {/* PASO 4: VISTA PREVIA Y EVALUACIÓN DE DISPONIBILIDAD DEL MES */}
-          {selectedRules.length === 0 ? (
+          {availableRecurringSlots.length === 0 ? null : selectedRules.length === 0 ? (
             <div className="p-6 rounded-2xl bg-slate-50 border border-slate-200 text-center text-xs text-slate-500">
               Seleccioná {targetFrequency} {targetFrequency === 1 ? 'horario' : 'horarios'} para calcular y visualizar la lista completa de clases de {selectedMonthOption.label}.
             </div>
@@ -691,7 +834,9 @@ export const MonthlyBookingSection: React.FC<MonthlyBookingSectionProps> = ({
               </div>
 
               {/* ACCIÓN DE RESERVA TEMPORAL (SUBBLOQUE 6B.3) */}
-              {previewResult.isFullyAvailable ? (
+              {previewResult.isFullyAvailable &&
+              selectedRules.length === targetFrequency &&
+              !overlapCheck.hasOverlap ? (
                 currentFixedRate.isConfigured ? (
                   <div className="p-5 rounded-2xl bg-gradient-to-r from-[#E8F3F8] to-slate-50 border border-[#00537A]/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                     <div className="space-y-1">
@@ -729,6 +874,15 @@ export const MonthlyBookingSection: React.FC<MonthlyBookingSectionProps> = ({
                     </div>
                   </div>
                 )
+              ) : selectedRules.length < targetFrequency ? (
+                <div className="p-4 rounded-2xl bg-slate-100 border border-slate-200 text-slate-600 text-xs flex items-start gap-3">
+                  <Info className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
+                  <p className="leading-relaxed">
+                    Seleccioná {targetFrequency - selectedRules.length}{' '}
+                    {targetFrequency - selectedRules.length === 1 ? 'horario más' : 'horarios más'} para completar la frecuencia de {targetFrequency}{' '}
+                    {targetFrequency === 1 ? 'clase' : 'clases'} por semana y habilitar la reserva mensual.
+                  </p>
+                </div>
               ) : (
                 <div className="p-4 rounded-2xl bg-slate-100 border border-slate-200 text-slate-600 text-xs flex items-start gap-3">
                   <Info className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
@@ -983,7 +1137,13 @@ export const MonthlyBookingSection: React.FC<MonthlyBookingSectionProps> = ({
                         setSubmitError('Debés iniciar sesión para reservar.');
                         return;
                       }
-                      if (!previewResult || !previewResult.isFullyAvailable || !currentFixedRate.isConfigured) {
+                      if (
+                        !previewResult ||
+                        !previewResult.isFullyAvailable ||
+                        !currentFixedRate.isConfigured ||
+                        selectedRules.length !== targetFrequency ||
+                        overlapCheck.hasOverlap
+                      ) {
                         return;
                       }
 
@@ -1014,9 +1174,25 @@ export const MonthlyBookingSection: React.FC<MonthlyBookingSectionProps> = ({
                           bookingKeyRef.current = null;
                           setBookingResult(result);
                         } else {
-                          setSubmitError(result.message);
+                          bookingKeyRef.current = null;
+                          const isAvailabilityConflict =
+                            result.errorCode === 'SLOT_LOCKED' ||
+                            (result.errorCode === 'FAILED_PRECONDITION' &&
+                              !result.message.toLowerCase().includes('tarifa'));
+
+                          if (isAvailabilityConflict) {
+                            setIsModalOpen(false);
+                            setSubmitError(null);
+                            setAvailabilityNotice(
+                              `${result.message || 'El horario seleccionado ya no está disponible.'} Actualizamos las opciones disponibles para ${selectedMonthOption.label}.`
+                            );
+                            await loadData();
+                          } else {
+                            setSubmitError(result.message);
+                          }
                         }
                       } catch (err: any) {
+                        bookingKeyRef.current = null;
                         setSubmitError(
                           err?.message || 'Ocurrió un error inesperado al procesar la reserva.'
                         );

@@ -166,6 +166,34 @@ export interface CalculateMonthlyOccurrencesParams {
   targetClassesPerWeek: number; // 1, 2 o 3
   referenceNow?: { dateStr: string; currentMinutes: number; nowDate?: Date };
   activeLocks?: TeacherSlotLock[];
+  blockedDates?: string[];
+}
+
+/**
+ * Determina si una regla recurrente se encuentra activa y no cancelada como disponibilidad.
+ */
+export function isRecurringRuleActive(rule: TeacherRecurringSlot | null | undefined): boolean {
+  if (!rule) return false;
+  if (rule.isActive !== true) return false;
+  const rawStatus = typeof rule.status === 'string' ? rule.status.trim().toLowerCase() : '';
+  if (rawStatus === 'cancelled' || rawStatus === 'canceled' || rawStatus === 'inactive' || rawStatus === 'disabled') {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Calcula la duración efectiva en minutos de un lock/intervalo ocupado.
+ */
+function resolveLockDurationMinutes(lock: TeacherSlotLock): number {
+  if (typeof lock.duration === 'number' && !isNaN(lock.duration) && lock.duration > 0) {
+    return lock.duration;
+  }
+  if (lock.startTime && lock.endTime) {
+    const diff = timeToMinutes(lock.endTime) - timeToMinutes(lock.startTime);
+    if (diff > 0) return diff;
+  }
+  return 45;
 }
 
 /**
@@ -173,7 +201,7 @@ export interface CalculateMonthlyOccurrencesParams {
  * evalúa la disponibilidad efectiva de cada clase.
  *
  * Jerarquía de evaluación para cada fecha:
- * 1. 'not_originated': La regla recurrente aún no estaba vigente (fecha anterior a originDate).
+ * 1. 'not_originated': La regla recurrente aún no estaba vigente (fecha anterior a originDate) o finalizó su vigencia (posterior a endDate/validUntil).
  * 2. 'past': Fecha u hora ya transcurrida en Buenos Aires.
  * 3. 'vacation': La fecha coincide con un período de vacaciones del profesor.
  * 4. 'blocked_date': La fecha está bloqueada de forma completa.
@@ -191,19 +219,27 @@ export function calculateMonthlyOccurrences(
     exceptions,
     availabilitySlots,
     targetClassesPerWeek,
+    blockedDates,
   } = params;
 
   const daysInMonth = getDaysInMonth(year, month);
   const nowBA = params.referenceNow || getBuenosAiresNow();
   const todayStr = nowBA.dateStr;
   const currentMinutes = nowBA.currentMinutes;
+  const blockedDatesSet =
+    Array.isArray(blockedDates) && blockedDates.length > 0 ? new Set(blockedDates) : null;
 
   const occurrences: MonthlyOccurrencePreview[] = [];
 
   // Recorrer cada regla recurrente seleccionada
   for (const rule of selectedRules) {
-    // Si la regla no está activa, ignorarla
-    if (!rule.isActive) continue;
+    // Si la regla no está activa o fue cancelada como disponibilidad, ignorarla
+    if (!isRecurringRuleActive(rule)) continue;
+
+    const validityEndDate =
+      (typeof rule.endDate === 'string' && rule.endDate.trim()) ||
+      (typeof rule.validUntil === 'string' && rule.validUntil.trim()) ||
+      '';
 
     // Iterar cada día del mes
     for (let day = 1; day <= daysInMonth; day++) {
@@ -221,11 +257,15 @@ export function calculateMonthlyOccurrences(
       let conflictReason: string | undefined = undefined;
       let exceptionId: string | undefined = undefined;
 
-      // 1. Comprobar originDate de la regla
+      // 1. Comprobar originDate y fin de vigencia (endDate / validUntil) de la regla
       if (rule.originDate && dateStr < rule.originDate) {
         status = 'not_originated';
         statusLabel = 'No vigente';
         conflictReason = `Esta regla recurrente comienza el ${rule.originDate}.`;
+      } else if (validityEndDate && dateStr > validityEndDate) {
+        status = 'not_originated';
+        statusLabel = 'Fuera de vigencia';
+        conflictReason = `Esta regla recurrente finalizó su vigencia el ${validityEndDate}.`;
       }
       // 2. Comprobar si la fecha y hora ya pasaron
       else if (
@@ -245,24 +285,33 @@ export function calculateMonthlyOccurrences(
           conflictReason = `Período no disponible registrado por el profesor (${vacation.reason || 'Receso previo'}).`;
           exceptionId = vacation.id;
         }
-        // 4. Comprobar si la fecha completa está bloqueada (blocked_date)
+        // 4. Comprobar si la fecha completa está bloqueada (blocked_date o blockedDates públicos)
         else {
           const blockedDate = exceptions.find(
-            (ex) => ex.type === 'blocked_date' && ex.startDate === dateStr
+            (ex) =>
+              ex.type === 'blocked_date' &&
+              dateStr >= ex.startDate &&
+              dateStr <= (ex.endDate || ex.startDate)
           );
           if (blockedDate) {
             status = 'blocked_date';
             statusLabel = 'Día bloqueado';
             conflictReason = `Fecha bloqueada en el calendario (${blockedDate.reason || 'Día no disponible'}).`;
             exceptionId = blockedDate.id;
+          } else if (blockedDatesSet && blockedDatesSet.has(dateStr)) {
+            status = 'blocked_date';
+            statusLabel = 'Día bloqueado';
+            conflictReason = 'Fecha bloqueada en el calendario del profesor.';
           }
           // 5. Comprobar si la ocurrencia puntual de esta regla está bloqueada (blocked_slot)
           else {
             const blockedSlot = exceptions.find(
               (ex) =>
                 ex.type === 'blocked_slot' &&
-                ex.startDate === dateStr &&
-                (ex.recurringSlotId === rule.id || ex.targetTime === rule.startTime)
+                dateStr >= ex.startDate &&
+                dateStr <= (ex.endDate || ex.startDate) &&
+                (ex.recurringSlotId === rule.id ||
+                  (Boolean(ex.targetTime) && ex.targetTime === rule.startTime))
             );
             if (blockedSlot) {
               status = 'blocked_slot';
@@ -302,13 +351,13 @@ export function calculateMonthlyOccurrences(
                     const expMs = lock.expiresAt?.toDate
                       ? lock.expiresAt.toDate().getTime()
                       : new Date(lock.expiresAt).getTime();
-                    if (nowTime >= expMs) return false;
+                    if (!isNaN(expMs) && nowTime >= expMs) return false;
                   }
                   return hasIntervalOverlap(
                     rule.startTime,
                     rule.duration,
                     lock.startTime,
-                    lock.duration || 45
+                    resolveLockDurationMinutes(lock)
                   );
                 });
 
@@ -367,6 +416,117 @@ export function calculateMonthlyOccurrences(
     isFullyAvailable,
     occurrences,
   };
+}
+
+export interface FilterAvailableRecurringSlotsParams {
+  year: number;
+  month: number; // 1 a 12
+  recurringSlots: TeacherRecurringSlot[];
+  exceptions: TeacherScheduleException[];
+  availabilitySlots: TeacherAvailability[];
+  activeLocks?: TeacherSlotLock[];
+  blockedDates?: string[];
+  referenceNow?: { dateStr: string; currentMinutes: number; nowDate?: Date };
+}
+
+/**
+ * Filtra los horarios recurrentes del profesor y devuelve ÚNICAMENTE aquellos que el alumno
+ * puede reservar realmente para un abono mensual completo en el mes seleccionado.
+ *
+ * Un horario se incluye solo si:
+ * - Está activo y no cancelado como disponibilidad.
+ * - Está vigente durante TODAS las fechas requeridas del mes (originDate y endDate/validUntil).
+ * - Genera al menos una ocurrencia en el mes.
+ * - El 100% de sus fechas en el mes están libres (sin fechas pasadas, vacaciones, días bloqueados,
+ *   bloqueos puntuales, clases reservadas ni retenciones temporales activas de 24h).
+ */
+export function filterAvailableRecurringSlotsForMonth(
+  params: FilterAvailableRecurringSlotsParams
+): TeacherRecurringSlot[] {
+  const {
+    year,
+    month,
+    recurringSlots,
+    exceptions,
+    availabilitySlots,
+    activeLocks,
+    blockedDates,
+    referenceNow,
+  } = params;
+
+  if (!Array.isArray(recurringSlots) || recurringSlots.length === 0) {
+    return [];
+  }
+
+  return recurringSlots.filter((rule) => {
+    if (!isRecurringRuleActive(rule)) {
+      return false;
+    }
+
+    const evaluation = calculateMonthlyOccurrences({
+      year,
+      month,
+      selectedRules: [rule],
+      exceptions,
+      availabilitySlots,
+      activeLocks,
+      blockedDates,
+      targetClassesPerWeek: 1,
+      referenceNow,
+    });
+
+    return evaluation.isFullyAvailable;
+  });
+}
+
+/**
+ * Determina si una regla recurrente candidata se superpone con alguna de las reglas ya seleccionadas.
+ */
+export function doesRuleOverlapWithAny(
+  candidate: TeacherRecurringSlot,
+  selectedRules: TeacherRecurringSlot[]
+): boolean {
+  return selectedRules.some((other) => {
+    if (candidate.id && other.id && candidate.id === other.id) return false;
+    if (candidate.dayOfWeek !== other.dayOfWeek) return false;
+    return hasIntervalOverlap(
+      candidate.startTime,
+      candidate.duration,
+      other.startTime,
+      other.duration
+    );
+  });
+}
+
+/**
+ * Calcula la cantidad máxima de horarios recurrentes mutuamente compatibles (sin superposición)
+ * disponibles para combinar en el mes seleccionado.
+ */
+export function getMaxNonOverlappingSlotCount(slots: TeacherRecurringSlot[]): number {
+  if (!Array.isArray(slots) || slots.length === 0) return 0;
+
+  const byDay = new Map<number, Array<{ start: number; end: number }>>();
+  for (const slot of slots) {
+    const start = timeToMinutes(slot.startTime);
+    const end = start + (slot.duration || 45);
+    const list = byDay.get(slot.dayOfWeek) || [];
+    list.push({ start, end });
+    byDay.set(slot.dayOfWeek, list);
+  }
+
+  let totalMax = 0;
+  for (const intervals of byDay.values()) {
+    intervals.sort((a, b) => a.end - b.end || a.start - b.start);
+    let lastEnd = -Infinity;
+    for (const iv of intervals) {
+      if (iv.start >= lastEnd) {
+        totalMax += 1;
+        lastEnd = iv.end;
+      }
+    }
+  }
+
+  return totalMax;
 }
 
 /**

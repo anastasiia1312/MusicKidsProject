@@ -26,12 +26,14 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { getStudentLessons } from '../../services/lessonService';
 import { subscribeToUserSupportCount } from '../../services/supportService';
+import { formatLessonDateTime } from '../../utils/dateUtils';
 import {
-  getLessonTimingLabel,
-  formatLessonDateTime,
-  getLessonStatusLabel,
-} from '../../utils/dateUtils';
-import { canJoinLessonMeet, isLessonMeetAuthorized } from '../../utils/meetValidation';
+  evaluateLessonMeetAccess,
+  getLessonTemporalState,
+  organizeLessonsChronologically,
+  resolveLessonDurationMinutes,
+} from '../../utils/meetValidation';
+import { useLessonTimeTick } from '../../hooks/useLessonTimeTick';
 import type { Lesson } from '../../types/lesson';
 
 interface StudentDashboardProps {
@@ -49,46 +51,17 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [showExpiredLessonsHistory, setShowExpiredLessonsHistory] = useState(false);
 
-  // Clases activas para "Tus próximas clases": excluye canceladas, expiradas y de abonos no confirmados > 24h
-  const activeLessons = useMemo(() => {
-    return lessons.filter((lesson) => {
-      if (lesson.status === 'cancelled' || lesson.status === 'expired') return false;
-      if ((lesson as any).paymentStatus === 'expired') return false;
-      if (
-        (lesson as any).paymentStatus === 'pending_confirmation' &&
-        (lesson as any).monthlyBookingId
-      ) {
-        const exp = (lesson as any).expiresAt;
-        const expTime = exp?.toDate
-          ? exp.toDate().getTime()
-          : exp
-          ? new Date(exp).getTime()
-          : 0;
-        if (expTime > 0 && expTime <= Date.now()) return false;
-      }
-      return true;
-    });
-  }, [lessons]);
+  // Actualización automática en transiciones de inicio/fin de clases sin recargar
+  const nowMs = useLessonTimeTick(lessons);
 
-  // Historial de clases con reserva vencida / expirada por falta de confirmación de pago
-  const expiredLessons = useMemo(() => {
-    return lessons.filter((lesson) => {
-      if (lesson.status === 'expired' || (lesson as any).paymentStatus === 'expired') return true;
-      if (
-        (lesson as any).paymentStatus === 'pending_confirmation' &&
-        (lesson as any).monthlyBookingId
-      ) {
-        const exp = (lesson as any).expiresAt;
-        const expTime = exp?.toDate
-          ? exp.toDate().getTime()
-          : exp
-          ? new Date(exp).getTime()
-          : 0;
-        if (expTime > 0 && expTime <= Date.now()) return true;
-      }
-      return false;
-    });
-  }, [lessons]);
+  // Organización cronológica centralizada (idéntica a TeacherDashboard)
+  const { upcomingLessons, pastLessons, cancelledLessons, expiredLessons } = useMemo(
+    () => organizeLessonsChronologically(lessons, nowMs),
+    [lessons, nowMs]
+  );
+
+  const hasAnyDisplayableLessons =
+    upcomingLessons.length > 0 || pastLessons.length > 0 || cancelledLessons.length > 0;
 
   const loadStudentLessons = async () => {
     if (!user?.uid) return;
@@ -125,6 +98,180 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
     } catch (error) {
       console.error('Error al cerrar sesión:', error);
     }
+  };
+
+  const renderLessonCard = (lesson: Lesson) => {
+    const isPendingPayment = (lesson as any).paymentStatus === 'pending_confirmation';
+    const isConfirmedPayment =
+      (lesson as any).paymentStatus === 'confirmed' ||
+      (!(lesson as any).paymentStatus && (lesson as any).bookingType === 'manual');
+    const temporalState = getLessonTemporalState(lesson, nowMs);
+    const meetAccess = evaluateLessonMeetAccess(lesson, nowMs);
+    const durationMinutes = resolveLessonDurationMinutes(lesson);
+    const isCancelled = temporalState.phase === 'cancelled';
+
+    const temporalBadgeClass =
+      temporalState.phase === 'in_progress'
+        ? 'bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold'
+        : temporalState.phase === 'past'
+        ? 'bg-slate-100 text-slate-600 border border-slate-200 font-semibold'
+        : temporalState.phase === 'cancelled'
+        ? 'bg-rose-100 text-rose-800 border border-rose-200 font-bold'
+        : 'bg-[#FFEAA7] text-[#7A5A00] font-semibold';
+
+    return (
+      <div
+        key={lesson.id}
+        id={`lesson-card-${lesson.id}`}
+        className={`bg-white rounded-[24px] p-5 sm:p-6 shadow-xs border hover:shadow-md transition-shadow flex flex-col sm:flex-row sm:items-center justify-between gap-5 relative group ${
+          temporalState.phase === 'in_progress'
+            ? 'border-emerald-200'
+            : isCancelled
+            ? 'border-rose-200/80 bg-white/90'
+            : 'border-slate-100'
+        }`}
+      >
+        {/* Lado Izquierdo: Icono Musical + Información de la Clase */}
+        <div className="flex items-center gap-4 sm:gap-5 min-w-0">
+          {/* Icono musical */}
+          <div
+            className={`w-16 h-16 sm:w-18 sm:h-18 rounded-2xl flex items-center justify-center shrink-0 ${
+              isCancelled
+                ? 'bg-rose-50 text-rose-500'
+                : temporalState.phase === 'past'
+                ? 'bg-slate-100 text-slate-500'
+                : 'bg-[#DDF1F8] text-[#00537A]'
+            }`}
+          >
+            <Music className="w-8 h-8 sm:w-9 sm:h-9 stroke-[2]" />
+          </div>
+
+          {/* Información */}
+          <div className="min-w-0 flex-1">
+            {/* Badges de estado visual temporal y pago */}
+            <div className="flex flex-wrap items-center gap-2 mb-2 select-none">
+              <div
+                className={`inline-flex items-center gap-1.5 text-xs px-3 py-1 rounded-full ${temporalBadgeClass}`}
+              >
+                {temporalState.phase === 'in_progress' && (
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                )}
+                <span>{temporalState.label}</span>
+              </div>
+              {!isCancelled && isPendingPayment && (
+                <div className="inline-flex items-center bg-amber-100 text-amber-900 border border-amber-200 text-xs font-bold px-2.5 py-0.5 rounded-full">
+                  <Clock className="w-3 h-3 mr-1 text-amber-700" />
+                  <span>Transferencia por confirmar</span>
+                </div>
+              )}
+              {!isCancelled && isConfirmedPayment && (
+                <div className="inline-flex items-center bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold px-2.5 py-0.5 rounded-full">
+                  <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-600" />
+                  <span>Abono confirmado</span>
+                </div>
+              )}
+            </div>
+
+            {/* Título de la clase */}
+            <h3
+              onClick={() => onNavigate(`/lesson/${lesson.id}`)}
+              className="font-parkinsans text-lg sm:text-xl font-bold text-slate-900 truncate hover:text-[#00537A] transition-colors cursor-pointer"
+              style={{ fontFamily: "'Parkinsans', sans-serif" }}
+              title="Entrar al aula de la clase"
+            >
+              {lesson.title}
+            </h3>
+
+            {/* Datos de la clase: Profesor, Fecha y Duración */}
+            <div
+              className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs sm:text-sm text-slate-600 mt-1.5 font-siemreap"
+              style={{ fontFamily: "'Siemreap', sans-serif" }}
+            >
+              <div className="flex items-center gap-1.5">
+                <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span>Profesor/a:</span>
+                <span className="font-semibold text-slate-800 truncate">
+                  {lesson.teacherName || 'Profesor'}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span>{formatLessonDateTime(lesson.date)}</span>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span>{durationMinutes} min</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Lado Derecho: Acceso a la clase (Google Meet y Aula virtual) */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2.5 shrink-0 pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-100">
+          {/* Botón Meet: Reglas idénticas para profesor y alumno */}
+          {meetAccess.canJoin && meetAccess.meetUrl ? (
+            <a
+              id={`btn-meet-lesson-${lesson.id}`}
+              href={meetAccess.meetUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bg-[#00537A] hover:bg-[#004262] active:scale-95 text-white font-semibold text-sm sm:text-base px-5 sm:px-6 py-2.5 rounded-full shadow-2xs transition-all cursor-pointer whitespace-nowrap text-center flex items-center justify-center gap-2"
+            >
+              <Video className="w-4 h-4 shrink-0" />
+              <span>Unirse a Meet</span>
+            </a>
+          ) : meetAccess.reason === 'before_start' ? (
+            <div className="flex flex-col items-stretch sm:items-center gap-1">
+              <button
+                id={`btn-meet-lesson-${lesson.id}`}
+                type="button"
+                disabled
+                aria-disabled="true"
+                title={meetAccess.availabilityMessage || undefined}
+                className="bg-slate-200 text-slate-500 font-semibold text-sm sm:text-base px-5 sm:px-6 py-2.5 rounded-full shadow-2xs cursor-not-allowed whitespace-nowrap text-center flex items-center justify-center gap-2"
+              >
+                <Video className="w-4 h-4 shrink-0" />
+                <span>Unirse a Meet</span>
+              </button>
+              {meetAccess.availabilityMessage && (
+                <span className="text-[11px] font-semibold text-slate-500 text-center">
+                  {meetAccess.availabilityMessage}
+                </span>
+              )}
+            </div>
+          ) : meetAccess.reason === 'pending_payment' ? (
+            <button
+              type="button"
+              disabled
+              aria-disabled="true"
+              title="Se habilitará Google Meet una vez que el profesor confirme la recepción del pago"
+              className="bg-slate-200 text-slate-500 font-semibold text-xs sm:text-sm px-4 sm:px-5 py-2.5 rounded-full shadow-2xs cursor-not-allowed whitespace-nowrap text-center"
+            >
+              Meet (Pendiente de pago)
+            </button>
+          ) : null}
+
+          {/* Botón Aula Virtual: Siempre disponible e independiente */}
+          {!isCancelled && (
+            <button
+              id={`btn-view-lesson-${lesson.id}`}
+              type="button"
+              onClick={() => onNavigate(`/lesson/${lesson.id}`)}
+              className={`${
+                meetAccess.canJoin
+                  ? 'bg-slate-100 hover:bg-slate-200 text-slate-800'
+                  : 'bg-[#00537A] hover:bg-[#004262] text-white'
+              } active:scale-95 font-semibold text-sm sm:text-base px-5 sm:px-6 py-2.5 rounded-full shadow-2xs transition-all cursor-pointer whitespace-nowrap text-center flex items-center justify-center gap-1.5`}
+            >
+              <span>Aula virtual</span>
+              <ArrowRight className="w-4 h-4 shrink-0" />
+            </button>
+          )}
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -281,17 +428,6 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setProfileDropdownOpen(false);
-                    loadStudentLessons();
-                  }}
-                  className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
-                >
-                  <RefreshCw className="w-3.5 h-3.5 text-slate-400" />
-                  Actualizar clases
-                </button>
-                <button
-                  type="button"
                   onClick={handleLogout}
                   className="w-full px-4 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50 flex items-center gap-2 cursor-pointer"
                 >
@@ -329,20 +465,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
               {!isSidebarCollapsed && <span>Panel</span>}
             </div>
 
-            {/* 2. Mis Clases */}
-            <div
-              id="sidebar-item-clases"
-              title="Mis Clases"
-              aria-label="Mis Clases"
-              className={`flex items-center ${
-                isSidebarCollapsed ? 'justify-center p-3' : 'gap-3.5 px-4 py-3'
-              } rounded-2xl text-slate-700 hover:bg-slate-50 hover:text-[#00537A] font-semibold text-sm cursor-pointer transition-colors`}
-            >
-              <Calendar className="w-5 h-5 text-slate-500 shrink-0" />
-              {!isSidebarCollapsed && <span>Mis Clases</span>}
-            </div>
-
-            {/* 3. Buscar profesores */}
+            {/* 2. Buscar profesores */}
             <div
               id="sidebar-item-buscar-profesores"
               title="Buscar profesores"
@@ -450,18 +573,25 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
           {/* Cabecera de la Sección Principal */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <h2
-                id="main-section-title"
-                className="font-parkinsans text-2xl sm:text-3xl font-bold text-[#00537A] tracking-tight leading-tight"
-                style={{ fontFamily: "'Parkinsans', sans-serif" }}
-              >
-                Tus próximas clases
-              </h2>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <h2
+                  id="main-section-title"
+                  className="font-parkinsans text-2xl sm:text-3xl font-bold text-[#00537A] tracking-tight leading-tight"
+                  style={{ fontFamily: "'Parkinsans', sans-serif" }}
+                >
+                  Próximas clases
+                </h2>
+                {upcomingLessons.length > 0 && (
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-[#E8F3F8] text-[#00537A]">
+                    {upcomingLessons.length}
+                  </span>
+                )}
+              </div>
               <p
                 className="font-siemreap text-slate-500 text-sm sm:text-base mt-1"
                 style={{ fontFamily: "'Siemreap', sans-serif" }}
               >
-                Aquí puedes ver y acceder a tus clases particulares programadas.
+                Aquí puedes ver y acceder a tus clases particulares programadas y en curso.
               </p>
             </div>
 
@@ -478,7 +608,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
             </button>
           </div>
 
-          {/* LISTADO DE TARJETAS DE CLASE (Datos reales de Firestore) */}
+          {/* LISTADO DE TARJETAS DE CLASE (Organización cronológica real) */}
           {loadingLessons ? (
             <div className="bg-white rounded-[24px] p-12 border border-slate-100 flex flex-col items-center justify-center text-slate-400 gap-3 shadow-xs">
               <Loader2 className="w-8 h-8 animate-spin text-[#00537A]" />
@@ -496,7 +626,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
                 Reintentar
               </button>
             </div>
-          ) : activeLessons.length === 0 ? (
+          ) : !hasAnyDisplayableLessons ? (
             <div className="bg-white rounded-[24px] p-10 sm:p-14 border border-slate-100 text-center flex flex-col items-center justify-center shadow-xs">
               <div className="w-16 h-16 rounded-2xl bg-[#DDF1F8] text-[#00537A] flex items-center justify-center mb-4">
                 <Music className="w-8 h-8" />
@@ -515,137 +645,70 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
               </p>
             </div>
           ) : (
-            <div className="space-y-4">
-              {activeLessons.map((lesson) => {
-                const isPendingPayment = (lesson as any).paymentStatus === 'pending_confirmation';
-                const isConfirmedPayment =
-                  (lesson as any).paymentStatus === 'confirmed' ||
-                  (!(lesson as any).paymentStatus && (lesson as any).bookingType === 'manual');
-                const isAuthorized = isLessonMeetAuthorized(lesson);
-
-                // El acceso a Google Meet se habilita ÚNICAMENTE para clases autorizadas/confirmadas con URL válida
-                const canJoinMeet = isAuthorized && canJoinLessonMeet(lesson);
-
-                return (
-                  <div
-                    key={lesson.id}
-                    id={`lesson-card-${lesson.id}`}
-                    className="bg-white rounded-[24px] p-5 sm:p-6 shadow-xs border border-slate-100 hover:shadow-md transition-shadow flex flex-col sm:flex-row sm:items-center justify-between gap-5 relative group"
-                  >
-                    {/* Lado Izquierdo: Icono Musical + Información de la Clase */}
-                    <div className="flex items-center gap-4 sm:gap-5 min-w-0">
-                      {/* Icono musical en contenedor celeste */}
-                      <div className="w-16 h-16 sm:w-18 sm:h-18 rounded-2xl bg-[#DDF1F8] text-[#00537A] flex items-center justify-center shrink-0">
-                        <Music className="w-8 h-8 sm:w-9 sm:h-9 stroke-[2]" />
-                      </div>
-
-                      {/* Información */}
-                      <div className="min-w-0 flex-1">
-                        {/* Badges de tiempo y estado */}
-                        <div className="flex flex-wrap items-center gap-2 mb-2 select-none">
-                          <div className="inline-flex items-center bg-[#FFEAA7] text-[#7A5A00] text-xs font-semibold px-3 py-1 rounded-full">
-                            {getLessonTimingLabel(lesson.date)}
-                          </div>
-                          {isPendingPayment && (
-                            <div className="inline-flex items-center bg-amber-100 text-amber-900 border border-amber-200 text-xs font-bold px-2.5 py-0.5 rounded-full">
-                              <Clock className="w-3 h-3 mr-1 text-amber-700" />
-                              <span>Transferencia por confirmar</span>
-                            </div>
-                          )}
-                          {isConfirmedPayment && (
-                            <div className="inline-flex items-center bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold px-2.5 py-0.5 rounded-full">
-                              <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-600" />
-                              <span>Abono confirmado</span>
-                            </div>
-                          )}
-                          {lesson.status && !isPendingPayment && !isConfirmedPayment && (
-                            <div className="inline-flex items-center bg-slate-100 text-slate-600 text-xs font-semibold px-2.5 py-1 rounded-full">
-                              {getLessonStatusLabel(lesson.status)}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Título de la clase */}
-                        <h3
-                          onClick={() => onNavigate(`/lesson/${lesson.id}`)}
-                          className="font-parkinsans text-lg sm:text-xl font-bold text-slate-900 truncate hover:text-[#00537A] transition-colors cursor-pointer"
-                          style={{ fontFamily: "'Parkinsans', sans-serif" }}
-                          title="Entrar al aula de la clase"
-                        >
-                          {lesson.title}
-                        </h3>
-
-                        {/* Datos de la clase: Profesor, Fecha y Duración */}
-                        <div
-                          className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs sm:text-sm text-slate-600 mt-1.5 font-siemreap"
-                          style={{ fontFamily: "'Siemreap', sans-serif" }}
-                        >
-                          <div className="flex items-center gap-1.5">
-                            <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            <span>Profesor/a:</span>
-                            <span className="font-semibold text-slate-800 truncate">
-                              {lesson.teacherName || 'Profesor'}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-1.5">
-                            <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            <span>{formatLessonDateTime(lesson.date)}</span>
-                          </div>
-
-                          {lesson.duration && (
-                            <div className="flex items-center gap-1.5">
-                              <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                              <span>{lesson.duration} min</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Lado Derecho: Acceso a la clase (Google Meet y Aula virtual) */}
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2.5 shrink-0 pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-100">
-                      {/* Botón Meet: Exclusivo para clases confirmadas y activas con enlace válido */}
-                      {canJoinMeet ? (
-                        <a
-                          id={`btn-meet-lesson-${lesson.id}`}
-                          href={lesson.meetUrl!.trim()}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="bg-[#00537A] hover:bg-[#004262] active:scale-95 text-white font-semibold text-sm sm:text-base px-5 sm:px-6 py-2.5 rounded-full shadow-2xs transition-all cursor-pointer whitespace-nowrap text-center flex items-center justify-center gap-2"
-                        >
-                          <Video className="w-4 h-4 shrink-0" />
-                          <span>Unirse a Meet</span>
-                        </a>
-                      ) : isPendingPayment ? (
-                        <button
-                          type="button"
-                          disabled
-                          title="Se habilitará Google Meet una vez que el profesor confirme la recepción del pago"
-                          className="bg-slate-200 text-slate-500 font-semibold text-xs sm:text-sm px-4 sm:px-5 py-2.5 rounded-full shadow-2xs cursor-not-allowed whitespace-nowrap text-center"
-                        >
-                          Meet (Pendiente de pago)
-                        </button>
-                      ) : null}
-
-                      {/* Botón Aula Virtual: Siempre disponible e independiente */}
-                      <button
-                        id={`btn-view-lesson-${lesson.id}`}
-                        type="button"
-                        onClick={() => onNavigate(`/lesson/${lesson.id}`)}
-                        className={`${
-                          canJoinMeet
-                            ? 'bg-slate-100 hover:bg-slate-200 text-slate-800'
-                            : 'bg-[#00537A] hover:bg-[#004262] text-white'
-                        } active:scale-95 font-semibold text-sm sm:text-base px-5 sm:px-6 py-2.5 rounded-full shadow-2xs transition-all cursor-pointer whitespace-nowrap text-center flex items-center justify-center gap-1.5`}
-                      >
-                        <span>Aula virtual</span>
-                        <ArrowRight className="w-4 h-4 shrink-0" />
-                      </button>
-                    </div>
+            <div className="space-y-8">
+              {/* 1. PRÓXIMAS CLASES (Futuras y en curso, orden ascendente) */}
+              <section id="student-upcoming-lessons-section" className="space-y-4">
+                {upcomingLessons.length === 0 ? (
+                  <div className="bg-white rounded-[24px] p-6 sm:p-8 border border-slate-100 text-center flex flex-col items-center justify-center shadow-xs">
+                    <p className="font-parkinsans text-sm sm:text-base font-bold text-slate-700">
+                      No tienes próximas clases programadas en este momento
+                    </p>
+                    <p className="font-siemreap text-xs text-slate-500 mt-1">
+                      Podés revisar tus clases pasadas abajo o reservar un nuevo abono con un profesor.
+                    </p>
                   </div>
-                );
-              })}
+                ) : (
+                  <div className="space-y-4">
+                    {upcomingLessons.map((lesson) => renderLessonCard(lesson))}
+                  </div>
+                )}
+              </section>
+
+              {/* 2. CLASES PASADAS (Finalizadas, orden descendente: más reciente primero) */}
+              {pastLessons.length > 0 && (
+                <section
+                  id="student-past-lessons-section"
+                  className="space-y-4 pt-4 border-t border-slate-200/70"
+                >
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <h3
+                      className="font-parkinsans text-xl sm:text-2xl font-bold text-slate-800 tracking-tight"
+                      style={{ fontFamily: "'Parkinsans', sans-serif" }}
+                    >
+                      Clases pasadas
+                    </h3>
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-slate-200/80 text-slate-700">
+                      {pastLessons.length}
+                    </span>
+                  </div>
+                  <div className="space-y-4">
+                    {pastLessons.map((lesson) => renderLessonCard(lesson))}
+                  </div>
+                </section>
+              )}
+
+              {/* 3. CLASES CANCELADAS (Conservando identificación explícita) */}
+              {cancelledLessons.length > 0 && (
+                <section
+                  id="student-cancelled-lessons-section"
+                  className="space-y-4 pt-4 border-t border-slate-200/70"
+                >
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <h3
+                      className="font-parkinsans text-lg sm:text-xl font-bold text-slate-700 tracking-tight"
+                      style={{ fontFamily: "'Parkinsans', sans-serif" }}
+                    >
+                      Clases canceladas
+                    </h3>
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-rose-100 text-rose-800">
+                      {cancelledLessons.length}
+                    </span>
+                  </div>
+                  <div className="space-y-3">
+                    {cancelledLessons.map((lesson) => renderLessonCard(lesson))}
+                  </div>
+                </section>
+              )}
             </div>
           )}
 

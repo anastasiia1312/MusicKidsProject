@@ -218,6 +218,8 @@ async function runTests() {
       monthlyBookingId: 'mb1',
       paymentStatus: 'confirmed',
       status: 'scheduled',
+      date: new Date(Date.now() - 60_000),
+      duration: 45,
       meetUrl: 'https://meet.google.com/abc-defg-hij',
     } as any),
     true

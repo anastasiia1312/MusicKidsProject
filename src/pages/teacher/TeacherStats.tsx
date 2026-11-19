@@ -10,9 +10,7 @@ import {
   PieChart as PieChartIcon,
   BarChart3,
   RefreshCw,
-  Info,
   CalendarDays,
-  Percent,
   Activity,
   ArrowUpRight,
 } from 'lucide-react';
@@ -522,129 +520,6 @@ export const TeacherStats: React.FC<TeacherStatsProps> = ({ onNavigate }) => {
                 <span className="font-bold text-slate-900">
                   {stats.classDistribution.cancelled} ({stats.classDistribution.cancelledPercent}%)
                 </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* 3. INDICADORES DE DESEMPEÑO (PERFORMANCE CARDS) */}
-        <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-sm border border-slate-100 space-y-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-xl font-bold text-[#00537A] flex items-center gap-2">
-                <Percent className="w-5 h-5 text-[#00537A]" />
-                Indicadores de Desempeño
-              </h3>
-              <p className="text-xs sm:text-sm text-slate-600 mt-1">
-                Métricas avanzadas de productividad, ocupación y relación con tus alumnos.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-            {/* Indicador 1: Promedio de clases por alumno */}
-            <div className="bg-slate-50/80 rounded-2xl p-5 border border-slate-200/60 flex flex-col justify-between">
-              <div>
-                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1">
-                  Promedio por Alumno
-                </span>
-                <div className="text-2xl font-extrabold text-slate-900">
-                  {stats.performance.avgLessonsPerStudent} <span className="text-sm font-semibold text-slate-500">clases / alumno</span>
-                </div>
-                <p className="text-xs text-slate-600 mt-2">
-                  Frecuencia promedio de clases en el período seleccionado.
-                </p>
-              </div>
-              <div className="mt-4 pt-3 border-t border-slate-200/50 flex items-center justify-between text-xs">
-                <span className="text-slate-500">Total clases activas:</span>
-                <span className="font-bold text-[#00537A]">
-                  {stats.summary.completedLessonsCount + stats.summary.scheduledLessonsCount}
-                </span>
-              </div>
-            </div>
-
-            {/* Indicador 2: Tasa de Ocupación */}
-            <div className="bg-slate-50/80 rounded-2xl p-5 border border-slate-200/60 flex flex-col justify-between">
-              <div>
-                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1">
-                  Ocupación de Agenda
-                </span>
-                <div className="text-2xl font-extrabold text-slate-900">
-                  {stats.performance.occupancyRatePercent !== null ? (
-                    `${stats.performance.occupancyRatePercent}%`
-                  ) : (
-                    <span className="text-base text-slate-500 font-semibold">Sin cupos</span>
-                  )}
-                </div>
-                <p className="text-xs text-slate-600 mt-2">
-                  {stats.performance.occupancyRatePercent !== null
-                    ? `${stats.performance.totalOccupiedSlots} de ${stats.performance.totalAvailableSlots} cupos disponibles ocupados.`
-                    : 'Configurá tus horarios recurrentes en Clases para medir tu ocupación.'}
-                </p>
-              </div>
-
-              {/* Mini barra de progreso */}
-              {stats.performance.occupancyRatePercent !== null && (
-                <div className="mt-4 pt-3 border-t border-slate-200/50">
-                  <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
-                    <div
-                      className="bg-[#00537A] h-2 rounded-full transition-all duration-500"
-                      style={{ width: `${stats.performance.occupancyRatePercent}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Indicador 3: Tasa de Asistencia (Regla estricta: datos reales o no disponibles) */}
-            <div className="bg-slate-50/80 rounded-2xl p-5 border border-slate-200/60 flex flex-col justify-between">
-              <div>
-                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1">
-                  Tasa de Asistencia
-                </span>
-                <div className="text-lg font-bold text-slate-700">
-                  Datos no disponibles
-                </div>
-                <p className="text-xs text-slate-600 mt-2">
-                  La plataforma requiere registro explícito de presentismo para calcular este indicador sin inferencias arbitrarias.
-                </p>
-              </div>
-              <div className="mt-4 pt-3 border-t border-slate-200/50 flex items-center gap-1.5 text-xs text-slate-500">
-                <Info className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                <span>Solo datos verificados</span>
-              </div>
-            </div>
-
-            {/* Indicador 4: Comparación Período Previo */}
-            <div className="bg-slate-50/80 rounded-2xl p-5 border border-slate-200/60 flex flex-col justify-between">
-              <div>
-                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1">
-                  Evolución Global
-                </span>
-                <div className="text-2xl font-extrabold text-slate-900">
-                  {renderDeltaBadge(stats.performance.previousPeriodComparison.incomeChangePercent)}
-                </div>
-                <p className="text-xs text-slate-600 mt-2">
-                  Crecimiento porcentual de ingresos respecto al período equivalente anterior.
-                </p>
-              </div>
-              <div className="mt-4 pt-3 border-t border-slate-200/50 space-y-1 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Alumnos:</span>
-                  <span className="font-bold text-slate-800">
-                    {stats.performance.previousPeriodComparison.studentsChangePercent !== null
-                      ? `${stats.performance.previousPeriodComparison.studentsChangePercent > 0 ? '+' : ''}${stats.performance.previousPeriodComparison.studentsChangePercent}%`
-                      : 'N/A'}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Clases:</span>
-                  <span className="font-bold text-slate-800">
-                    {stats.performance.previousPeriodComparison.lessonsChangePercent !== null
-                      ? `${stats.performance.previousPeriodComparison.lessonsChangePercent > 0 ? '+' : ''}${stats.performance.previousPeriodComparison.lessonsChangePercent}%`
-                      : 'N/A'}
-                  </span>
-                </div>
               </div>
             </div>
           </div>

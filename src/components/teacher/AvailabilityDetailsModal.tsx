@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Calendar,
   Clock,
@@ -20,7 +20,8 @@ import {
 } from 'lucide-react';
 import type { DisplayCalendarSlot } from '../../pages/teacher/TeacherAvailability';
 import { calculateEndTime } from '../../services/recurringScheduleService';
-import { canJoinLessonMeet, isValidMeetUrl } from '../../utils/meetValidation';
+import { evaluateLessonMeetAccess } from '../../utils/meetValidation';
+import { useLessonTimeTick } from '../../hooks/useLessonTimeTick';
 
 interface AvailabilityDetailsModalProps {
   slot: DisplayCalendarSlot | null;
@@ -87,6 +88,28 @@ export const AvailabilityDetailsModal: React.FC<AvailabilityDetailsModalProps> =
 }) => {
   const [isRestoring, setIsRestoring] = useState(false);
   const [restoreError, setRestoreError] = useState<string | null>(null);
+
+  const modalLessonTarget = useMemo(() => {
+    if (!slot || slot.status !== 'booked') return null;
+    if (slot.bookedLesson) return slot.bookedLesson;
+    return {
+      date: slot.date,
+      startTime: slot.startTime,
+      duration: slot.duration,
+      status: 'scheduled' as const,
+      meetUrl: slot.meetUrl,
+    };
+  }, [slot]);
+
+  const tickTargets = useMemo(
+    () => (modalLessonTarget ? [modalLessonTarget] : []),
+    [modalLessonTarget]
+  );
+  const nowMs = useLessonTimeTick(tickTargets);
+  const meetAccess = useMemo(
+    () => evaluateLessonMeetAccess(modalLessonTarget, nowMs),
+    [modalLessonTarget, nowMs]
+  );
 
   if (!slot) return null;
 
@@ -300,27 +323,50 @@ export const AvailabilityDetailsModal: React.FC<AvailabilityDetailsModalProps> =
               )}
 
               {/* Enlace oficial de Google Meet vinculado a la clase */}
-              {(slot.bookedLesson ? canJoinLessonMeet(slot.bookedLesson) : isValidMeetUrl(slot.meetUrl)) &&
-              isValidMeetUrl(slot.bookedLesson?.meetUrl || slot.meetUrl) ? (
+              {meetAccess.canJoin && meetAccess.meetUrl ? (
                 <div className="pt-2 border-t border-indigo-100 flex flex-col gap-2">
                   <div className="flex items-center gap-1.5 text-[#00537A] font-bold">
                     <Video className="w-4 h-4 text-[#00537A]" />
                     <span>Videollamada de Google Meet vinculada</span>
                   </div>
                   <a
-                    href={(slot.bookedLesson?.meetUrl || slot.meetUrl)!.trim()}
+                    href={meetAccess.meetUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-[#00537A] hover:bg-[#004160] text-white shadow-2xs transition-colors cursor-pointer"
                   >
-                    <span>Unirse a Google Meet</span>
+                    <span>Unirse a Meet</span>
                     <ExternalLink className="w-3.5 h-3.5" />
                   </a>
                 </div>
+              ) : meetAccess.reason === 'before_start' ? (
+                <div className="pt-2 border-t border-indigo-100 flex flex-col gap-1.5">
+                  <div className="flex items-center gap-1.5 text-slate-600 font-bold">
+                    <Video className="w-4 h-4 text-slate-500" />
+                    <span>Videollamada de Google Meet vinculada</span>
+                  </div>
+                  <button
+                    type="button"
+                    disabled
+                    aria-disabled="true"
+                    title={meetAccess.availabilityMessage || undefined}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-slate-200 text-slate-500 cursor-not-allowed"
+                  >
+                    <Video className="w-3.5 h-3.5" />
+                    <span>Unirse a Meet</span>
+                  </button>
+                  {meetAccess.availabilityMessage && (
+                    <p className="text-[11px] font-semibold text-slate-600 text-center">
+                      {meetAccess.availabilityMessage}
+                    </p>
+                  )}
+                </div>
               ) : (
                 <p className="text-[11px] text-slate-500 italic pt-1">
-                  {(slot.bookedLesson as any)?.paymentStatus === 'pending_confirmation'
+                  {meetAccess.reason === 'pending_payment'
                     ? 'Google Meet se habilitará cuando confirmes la recepción del pago del abono.'
+                    : meetAccess.reason === 'cancelled'
+                    ? 'Esta clase fue cancelada. El acceso a Google Meet está deshabilitado.'
                     : 'No hay enlace de Google Meet asignado para esta clase confirmada.'}
                 </p>
               )}

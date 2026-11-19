@@ -16,6 +16,9 @@ export interface TeacherRecurringSlot {
   duration: RecurringSlotDuration; // 30, 45 o 60 minutos
   isActive: boolean; // Si la regla está activa o pausada/desactivada
   originDate: string; // Formato "YYYY-MM-DD" de inicio de la recurrencia
+  endDate?: string; // Formato opcional "YYYY-MM-DD" de fin de vigencia
+  validUntil?: string; // Alias opcional "YYYY-MM-DD" de fin de vigencia
+  status?: 'active' | 'inactive' | 'cancelled' | string;
   createdAt?: Timestamp | any;
   updatedAt?: Timestamp | any;
 }
