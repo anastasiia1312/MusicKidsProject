@@ -21,6 +21,8 @@ import type {
   ExpireMonthlyBookingsResponse,
   ProvisionMonthlyBookingMeetPayload,
   ProvisionMonthlyBookingMeetResponse,
+  GetPendingBookingBankDetailsPayload,
+  GetPendingBookingBankDetailsResponse,
 } from './types';
 import {
   createMonthlyBookingTransaction,
@@ -28,6 +30,7 @@ import {
   getTeacherPublicAvailabilityHelper,
   expireMonthlyBookingsBatch,
   provisionMonthlyBookingMeetService,
+  getPendingBookingBankDetailsService,
 } from './monthlyBookingService';
 import { createManualLessonTransaction } from './manualLessonService';
 
@@ -326,5 +329,49 @@ export const provisionMonthlyBookingMeet = onCall(
     }
   }
 );
+
+/**
+ * Cloud Function v2 Callable (solo lectura):
+ * Devuelve los datos bancarios del profesor únicamente al alumno autenticado
+ * que posee una reserva mensual pendiente de confirmación y vigente (<= 24h).
+ */
+export const getPendingBookingBankDetails = onCall(
+  {
+    region: 'us-central1',
+    cors: true,
+  },
+  async (request): Promise<GetPendingBookingBankDetailsResponse> => {
+    if (!request.auth || !request.auth.uid) {
+      throw new HttpsError(
+        'unauthenticated',
+        'Debe iniciar sesión como alumno para consultar los datos bancarios de su reserva.'
+      );
+    }
+
+    const authenticatedStudentId = request.auth.uid;
+    const data = request.data as GetPendingBookingBankDetailsPayload;
+
+    if (!data || typeof data !== 'object') {
+      throw new HttpsError(
+        'invalid-argument',
+        'El identificador de la reserva mensual es obligatorio.'
+      );
+    }
+
+    try {
+      return await getPendingBookingBankDetailsService(db, authenticatedStudentId, data);
+    } catch (err: any) {
+      if (err instanceof HttpsError) {
+        throw err;
+      }
+      console.error('Error al procesar getPendingBookingBankDetails (sin datos sensibles).');
+      throw new HttpsError(
+        'internal',
+        'No se pudieron consultar los datos bancarios en este momento.'
+      );
+    }
+  }
+);
+
 
 

@@ -145,3 +145,19 @@ export interface ProvisionMonthlyBookingMeetResponse {
   alreadyProvisioned: boolean;
   message: string;
 }
+
+export interface GetPendingBookingBankDetailsPayload {
+  bookingId: string;
+}
+
+export interface GetPendingBookingBankDetailsResponse {
+  bookingId: string;
+  available: boolean;
+  bankDetails: {
+    accountHolder: string;
+    alias: string;
+    cbuCvu: string;
+    bankName?: string;
+  } | null;
+}
+

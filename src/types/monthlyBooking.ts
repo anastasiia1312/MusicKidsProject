@@ -112,6 +112,20 @@ export interface ProvisionMonthlyBookingMeetResult {
   message: string;
 }
 
+export interface PendingBookingBankDetails {
+  accountHolder: string;
+  alias: string;
+  cbuCvu: string;
+  bankName?: string;
+}
+
+export interface PendingBookingBankDetailsResult {
+  bookingId: string;
+  available: boolean;
+  bankDetails: PendingBookingBankDetails | null;
+  unavailableReason?: 'not_configured' | 'service_unavailable';
+}
+
 /**
  * Payload de entrada para la confirmación de abono mensual
  */

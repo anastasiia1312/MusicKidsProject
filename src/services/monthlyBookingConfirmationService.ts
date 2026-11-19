@@ -46,13 +46,14 @@ import type {
   CreateTemporaryMonthlyBookingPayload,
   TemporaryMonthlyBookingResult,
   ProvisionMonthlyBookingMeetResult,
+  PendingBookingBankDetailsResult,
 } from '../types/monthlyBooking';
 import type { UserProfile } from '../types/auth';
 import { fetchUserProfile } from './authService';
 import { getTeacherRecurringSlots } from './recurringScheduleService';
 import { getTeacherScheduleExceptions } from './teacherScheduleExceptionService';
 import { getTeacherAvailability } from './availabilityService';
-import { getTeacherLessons } from './lessonService';
+import { getTeacherLessons, getStudentLessons } from './lessonService';
 
 /**
  * Genera una clave determinista única para bloquear franjas de horario por profesor.
@@ -1112,5 +1113,195 @@ export async function getTeacherMonthlyBookings(
     }
   }
 }
+
+/**
+ * Reconstruye abonos mensuales a partir de las clases del alumno (fallback solo lectura).
+ */
+function reconstructStudentMonthlyBookingsFromLessons(
+  studentId: string,
+  lessons: Lesson[]
+): MonthlyBooking[] {
+  if (!Array.isArray(lessons) || lessons.length === 0) return [];
+
+  const byTeacher = new Map<string, Lesson[]>();
+  for (const lesson of lessons) {
+    if (!lesson.teacherId || !(lesson as any).monthlyBookingId) continue;
+    if (!byTeacher.has(lesson.teacherId)) {
+      byTeacher.set(lesson.teacherId, []);
+    }
+    byTeacher.get(lesson.teacherId)!.push(lesson);
+  }
+
+  const reconstructed: MonthlyBooking[] = [];
+  for (const [teacherId, teacherLessons] of byTeacher.entries()) {
+    const items = reconstructMonthlyBookingsFromLessons(teacherId, teacherLessons).map((b) => ({
+      ...b,
+      studentId: b.studentId || studentId,
+    }));
+    reconstructed.push(...items);
+  }
+
+  return reconstructed.sort((a, b) => {
+    const aTime = a.createdAt?.toDate
+      ? a.createdAt.toDate().getTime()
+      : a.createdAt
+      ? new Date(a.createdAt).getTime()
+      : 0;
+    const bTime = b.createdAt?.toDate
+      ? b.createdAt.toDate().getTime()
+      : b.createdAt
+      ? new Date(b.createdAt).getTime()
+      : 0;
+    return bTime - aTime;
+  });
+}
+
+/**
+ * Consulta en modo solo lectura los abonos mensuales del alumno autenticado.
+ * Marca en memoria como 'expired' los abonos pendientes cuyo plazo de 24h ya venció,
+ * sin alterar reglas ni estados persistidos.
+ */
+export async function getStudentMonthlyBookings(
+  studentId: string,
+  preloadedLessons?: Lesson[]
+): Promise<MonthlyBooking[]> {
+  if (!studentId) return [];
+
+  try {
+    const q = query(
+      collection(db, 'monthlyBookings'),
+      where('studentId', '==', studentId)
+    );
+    const snap = await getDocs(q);
+    const nowMs = Date.now();
+
+    const bookings: MonthlyBooking[] = snap.docs.map((d) => {
+      const data = d.data() as any;
+      let status = data.status;
+
+      if (status === 'pending_payment_confirmation' || status === 'pending_payment') {
+        const exp = data.expiresAt;
+        const expTime = exp?.toDate
+          ? exp.toDate().getTime()
+          : exp
+          ? new Date(exp).getTime()
+          : 0;
+        if (expTime > 0 && expTime <= nowMs) {
+          status = 'expired';
+        }
+      }
+
+      return {
+        id: d.id,
+        ...data,
+        status,
+      };
+    });
+
+    return bookings.sort((a, b) => {
+      const aTime = a.createdAt?.toDate
+        ? a.createdAt.toDate().getTime()
+        : a.createdAt
+        ? new Date(a.createdAt).getTime()
+        : 0;
+      const bTime = b.createdAt?.toDate
+        ? b.createdAt.toDate().getTime()
+        : b.createdAt
+        ? new Date(b.createdAt).getTime()
+        : 0;
+      return bTime - aTime;
+    });
+  } catch (err: any) {
+    const errStr = String(err?.message || err);
+    if (
+      errStr.includes('permission-denied') ||
+      errStr.includes('insufficient permissions') ||
+      errStr.includes('Missing or insufficient')
+    ) {
+      console.warn(
+        'Lectura directa de monthlyBookings no disponible para el alumno; reconstruyendo desde sus clases.'
+      );
+    } else {
+      console.warn('Advertencia al consultar abonos mensuales del alumno:', err);
+    }
+
+    if (preloadedLessons && preloadedLessons.length > 0) {
+      return reconstructStudentMonthlyBookingsFromLessons(studentId, preloadedLessons);
+    }
+
+    try {
+      const lessons = await getStudentLessons(studentId);
+      return reconstructStudentMonthlyBookingsFromLessons(studentId, lessons);
+    } catch {
+      return [];
+    }
+  }
+}
+
+/**
+ * Solicita a la Cloud Function de solo lectura `getPendingBookingBankDetails` (us-central1)
+ * los datos bancarios del profesor únicamente para una reserva mensual pendiente y vigente
+ * del alumno autenticado. Nunca registra datos bancarios en consola.
+ */
+export async function getPendingBookingBankDetails(
+  bookingId: string
+): Promise<PendingBookingBankDetailsResult> {
+  const cleanId = (bookingId || '').trim();
+  if (!cleanId) {
+    return {
+      bookingId: '',
+      available: false,
+      bankDetails: null,
+      unavailableReason: 'not_configured',
+    };
+  }
+
+  try {
+    const fn = httpsCallable<
+      { bookingId: string },
+      {
+        bookingId: string;
+        available: boolean;
+        bankDetails: {
+          accountHolder: string;
+          alias: string;
+          cbuCvu: string;
+          bankName?: string;
+        } | null;
+      }
+    >(functions, 'getPendingBookingBankDetails');
+
+    const res = await fn({ bookingId: cleanId });
+    const data = res.data;
+
+    if (!data?.available || !data.bankDetails) {
+      return {
+        bookingId: cleanId,
+        available: false,
+        bankDetails: null,
+        unavailableReason: 'not_configured',
+      };
+    }
+
+    return {
+      bookingId: cleanId,
+      available: true,
+      bankDetails: {
+        accountHolder: data.bankDetails.accountHolder || '',
+        alias: data.bankDetails.alias || '',
+        cbuCvu: data.bankDetails.cbuCvu || '',
+        ...(data.bankDetails.bankName ? { bankName: data.bankDetails.bankName } : {}),
+      },
+    };
+  } catch {
+    return {
+      bookingId: cleanId,
+      available: false,
+      bankDetails: null,
+      unavailableReason: 'service_unavailable',
+    };
+  }
+}
+
 
 

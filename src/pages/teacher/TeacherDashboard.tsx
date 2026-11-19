@@ -4,7 +4,6 @@ import {
   Music,
   User,
   ArrowRight,
-  Megaphone,
   Loader2,
   AlertCircle,
   Clock,
@@ -37,6 +36,7 @@ import type { Lesson } from '../../types/lesson';
 import type { UserProfile } from '../../types/auth';
 import type { MonthlyBooking } from '../../types/monthlyBooking';
 import { TeacherLayout } from '../../components/teacher/TeacherLayout';
+import { NotificationCenter } from '../../components/shared/NotificationCenter';
 
 interface TeacherDashboardProps {
   onNavigate: (path: string) => void;
@@ -198,6 +198,32 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
   } | null>(null);
   const [provisioningBookingIds, setProvisioningBookingIds] = useState<Record<string, boolean>>({});
   const [showExpiredBookingsHistory, setShowExpiredBookingsHistory] = useState(false);
+  const [highlightedBookingId, setHighlightedBookingId] = useState<string | null>(null);
+
+  const studentNameById = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const s of students) {
+      if (s.uid && s.name) {
+        map[s.uid] = s.name;
+      }
+    }
+    return map;
+  }, [students]);
+
+  const handleViewPendingBooking = (bookingId: string) => {
+    const targetEl =
+      document.getElementById(`pending-booking-card-${bookingId}`) ||
+      document.getElementById('pending-bookings-title');
+
+    if (targetEl) {
+      targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    setHighlightedBookingId(bookingId);
+    window.setTimeout(() => {
+      setHighlightedBookingId((prev) => (prev === bookingId ? null : prev));
+    }, 2600);
+  };
 
   const loadData = async () => {
     if (!user?.uid) return;
@@ -777,7 +803,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
                 <div
                   key={booking.id}
                   id={`pending-booking-card-${booking.id}`}
-                  className="bg-white rounded-[24px] p-5 sm:p-6 shadow-xs border border-slate-100 hover:shadow-md transition-shadow flex flex-col lg:flex-row lg:items-center justify-between gap-5 relative"
+                  className={`bg-white rounded-[24px] p-5 sm:p-6 shadow-xs border hover:shadow-md transition-all flex flex-col lg:flex-row lg:items-center justify-between gap-5 relative ${
+                    highlightedBookingId === booking.id
+                      ? 'border-[#FFB800] ring-2 ring-[#FFB800]/50 shadow-md'
+                      : 'border-slate-100'
+                  }`}
                 >
                   {/* Datos Principales del Abono */}
                   <div className="space-y-3 min-w-0 flex-1">
@@ -1156,32 +1186,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
         )}
       </div>
 
-      {/* BLOQUE INFERIOR: NOTICIAS O RECORDATORIOS IMPORTANTES (Mockup) */}
-      <div
+      {/* BLOQUE INFERIOR: CENTRO DE NOTICIAS Y RECORDATORIOS IMPORTANTES */}
+      <NotificationCenter
         id="teacher-news-banner"
-        className="bg-white rounded-[24px] p-5 sm:p-6 shadow-xs border border-slate-100 flex items-center gap-5 sm:gap-6 mt-2"
-      >
-        <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-[#FFF5DB] text-[#FFB800] flex items-center justify-center shrink-0">
-          <Megaphone className="w-7 h-7 sm:w-8 sm:h-8 text-[#00537A] stroke-[2]" />
-        </div>
-
-        <div className="hidden sm:block w-px h-12 bg-slate-200 shrink-0" />
-
-        <div>
-          <h4
-            className="font-parkinsans font-bold text-base sm:text-lg text-[#00537A]"
-            style={{ fontFamily: "'Parkinsans', sans-serif" }}
-          >
-            Noticias o recordatorios importantes
-          </h4>
-          <p
-            className="font-siemreap text-slate-500 text-xs sm:text-sm mt-0.5"
-            style={{ fontFamily: "'Siemreap', sans-serif" }}
-          >
-            Aquí aparecerán avisos, novedades y recordatorios de la plataforma.
-          </p>
-        </div>
-      </div>
+        role="teacher"
+        loading={loadingBookings}
+        bookings={monthlyBookings}
+        studentNameById={studentNameById}
+        onViewBooking={handleViewPendingBooking}
+      />
 
       {/* MODAL DE CONFIRMACIÓN MANUAL DE PAGO RECIBIDO (SUBBLOQUE 6B.6) */}
       {isConfirmModalOpen && selectedBookingForConfirm && (

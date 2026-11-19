@@ -18,6 +18,8 @@ import type {
   ExpireMonthlyBookingsResponse,
   ProvisionMonthlyBookingMeetPayload,
   ProvisionMonthlyBookingMeetResponse,
+  GetPendingBookingBankDetailsPayload,
+  GetPendingBookingBankDetailsResponse,
 } from './types';
 
 const MONTH_NAMES_SPANISH = [
@@ -1788,4 +1790,133 @@ export async function expireMonthlyBookingsBatch(
     message: `Proceso de expiración completado. ${expiredBookingIds.length} abono(s) expirado(s) y horarios liberados.`,
   };
 }
+
+/**
+ * Consulta de solo lectura de datos bancarios del profesor para un alumno
+ * con una reserva mensual pendiente de confirmación vigente (dentro de las 24h).
+ *
+ * Garantías de seguridad:
+ * - Verifica que el usuario autenticado sea un alumno activo.
+ * - Verifica que la reserva exista, pertenezca al alumno autenticado, esté pendiente
+ *   de confirmación y no haya vencido (expiresAt > now).
+ * - Lee users/{teacherId}/privateSettings/bankDetails vía Admin SDK sin abrir
+ *   permisos directos en firestore.rules ni duplicar datos bancarios en otras colecciones.
+ * - Nunca registra datos bancarios en logs.
+ */
+export async function getPendingBookingBankDetailsService(
+  db: admin.firestore.Firestore,
+  authenticatedStudentId: string,
+  payload: GetPendingBookingBankDetailsPayload
+): Promise<GetPendingBookingBankDetailsResponse> {
+  const sanitizedBookingId =
+    typeof payload?.bookingId === 'string' ? payload.bookingId.trim() : '';
+
+  if (!sanitizedBookingId) {
+    throw new HttpsError(
+      'invalid-argument',
+      'El identificador de la reserva mensual es obligatorio.'
+    );
+  }
+
+  // 1. Verificar perfil de alumno activo
+  const studentSnap = await db.doc(`users/${authenticatedStudentId}`).get();
+  if (!studentSnap.exists) {
+    throw new HttpsError('permission-denied', 'Perfil de alumno no encontrado.');
+  }
+  const studentData = studentSnap.data() || {};
+  if (studentData.role !== 'student' || studentData.status === 'disabled') {
+    throw new HttpsError(
+      'permission-denied',
+      'Solo los alumnos activos pueden consultar datos de transferencia de sus reservas.'
+    );
+  }
+
+  // 2. Verificar existencia, pertenencia, estado pendiente y vigencia de la reserva
+  const bookingSnap = await db.doc(`monthlyBookings/${sanitizedBookingId}`).get();
+  if (!bookingSnap.exists) {
+    throw new HttpsError('not-found', 'La reserva mensual solicitada no existe.');
+  }
+
+  const bookingData = bookingSnap.data() || {};
+  if (bookingData.studentId !== authenticatedStudentId) {
+    throw new HttpsError(
+      'permission-denied',
+      'No tenés autorización para consultar los datos de esta reserva.'
+    );
+  }
+
+  const status = String(bookingData.status || '');
+  const isPending =
+    status === 'pending_payment_confirmation' || status === 'pending_payment';
+  if (!isPending) {
+    return {
+      bookingId: sanitizedBookingId,
+      available: false,
+      bankDetails: null,
+    };
+  }
+
+  // Verificar que la reserva no esté vencida
+  const rawExpiresAt = bookingData.expiresAt;
+  const expiresAtMs = rawExpiresAt?.toDate
+    ? rawExpiresAt.toDate().getTime()
+    : rawExpiresAt
+    ? new Date(rawExpiresAt).getTime()
+    : 0;
+
+  if (!expiresAtMs || isNaN(expiresAtMs) || expiresAtMs <= Date.now()) {
+    return {
+      bookingId: sanitizedBookingId,
+      available: false,
+      bankDetails: null,
+    };
+  }
+
+  const teacherId =
+    typeof bookingData.teacherId === 'string' ? bookingData.teacherId.trim() : '';
+  if (!teacherId) {
+    return {
+      bookingId: sanitizedBookingId,
+      available: false,
+      bankDetails: null,
+    };
+  }
+
+  // 3. Consultar datos bancarios privados del profesor sin exponer ni loguear campos extra
+  const bankSnap = await db.doc(`users/${teacherId}/privateSettings/bankDetails`).get();
+  if (!bankSnap.exists) {
+    return {
+      bookingId: sanitizedBookingId,
+      available: false,
+      bankDetails: null,
+    };
+  }
+
+  const rawBank = bankSnap.data() || {};
+  const accountHolder =
+    typeof rawBank.accountHolder === 'string' ? rawBank.accountHolder.trim() : '';
+  const alias = typeof rawBank.alias === 'string' ? rawBank.alias.trim() : '';
+  const cbuCvu = typeof rawBank.cbuCvu === 'string' ? rawBank.cbuCvu.trim() : '';
+  const bankName = typeof rawBank.bankName === 'string' ? rawBank.bankName.trim() : '';
+
+  if (!accountHolder && !alias && !cbuCvu) {
+    return {
+      bookingId: sanitizedBookingId,
+      available: false,
+      bankDetails: null,
+    };
+  }
+
+  return {
+    bookingId: sanitizedBookingId,
+    available: true,
+    bankDetails: {
+      accountHolder,
+      alias,
+      cbuCvu,
+      ...(bankName ? { bankName } : {}),
+    },
+  };
+}
+
 

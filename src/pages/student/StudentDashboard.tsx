@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Calendar,
   Music,
   User,
-  Megaphone,
   ChevronDown,
   Loader2,
   AlertCircle,
@@ -17,6 +16,12 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { getStudentLessons } from '../../services/lessonService';
+import {
+  getStudentMonthlyBookings,
+  getPendingBookingBankDetails,
+} from '../../services/monthlyBookingConfirmationService';
+import { getStudentTasks } from '../../services/taskService';
+import { fetchUserProfile } from '../../services/authService';
 import { formatLessonDateTime } from '../../utils/dateUtils';
 import {
   evaluateLessonMeetAccess,
@@ -26,7 +31,13 @@ import {
 } from '../../utils/meetValidation';
 import { useLessonTimeTick } from '../../hooks/useLessonTimeTick';
 import { StudentLayout } from '../../components/student/StudentLayout';
+import { NotificationCenter } from '../../components/shared/NotificationCenter';
 import type { Lesson } from '../../types/lesson';
+import type {
+  MonthlyBooking,
+  PendingBookingBankDetailsResult,
+} from '../../types/monthlyBooking';
+import type { Task } from '../../types/task';
 
 interface StudentDashboardProps {
   onNavigate: (path: string) => void;
@@ -39,6 +50,19 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
   const [loadingLessons, setLoadingLessons] = useState(true);
   const [lessonsError, setLessonsError] = useState<string | null>(null);
   const [showExpiredLessonsHistory, setShowExpiredLessonsHistory] = useState(false);
+
+  // Estados del centro de notificaciones del alumno
+  const [monthlyBookings, setMonthlyBookings] = useState<MonthlyBooking[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [teacherNameById, setTeacherNameById] = useState<Record<string, string>>({});
+  const [bankDetailsByBookingId, setBankDetailsByBookingId] = useState<
+    Record<string, PendingBookingBankDetailsResult>
+  >({});
+  const [loadingBankDetailsByBookingId, setLoadingBankDetailsByBookingId] = useState<
+    Record<string, boolean>
+  >({});
+  const [loadingNotifications, setLoadingNotifications] = useState(true);
+  const loadRequestIdRef = useRef(0);
 
   // Actualización automática en transiciones de inicio/fin de clases sin recargar
   const nowMs = useLessonTimeTick(lessons);
@@ -55,17 +79,119 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
   const loadStudentLessons = async () => {
     if (!user?.uid) return;
 
+    const currentRequestId = ++loadRequestIdRef.current;
     setLoadingLessons(true);
+    setLoadingNotifications(true);
     setLessonsError(null);
-    try {
-      const studentLessons = await getStudentLessons(user.uid);
+
+    let studentLessons: Lesson[] = [];
+    let studentTasks: Task[] = [];
+
+    const [lessonsResult, tasksResult] = await Promise.allSettled([
+      getStudentLessons(user.uid),
+      getStudentTasks(user.uid),
+    ]);
+
+    if (currentRequestId !== loadRequestIdRef.current) return;
+
+    if (lessonsResult.status === 'fulfilled') {
+      studentLessons = lessonsResult.value;
       setLessons(studentLessons);
-    } catch (err: any) {
-      console.error('Error al cargar clases del alumno:', err);
+    } else {
+      console.error('Error al cargar clases del alumno:', lessonsResult.reason);
       setLessonsError('No pudimos cargar las clases. Intentá nuevamente.');
-    } finally {
-      setLoadingLessons(false);
     }
+    setLoadingLessons(false);
+
+    if (tasksResult.status === 'fulfilled') {
+      studentTasks = tasksResult.value;
+      setTasks(studentTasks);
+    } else {
+      setTasks([]);
+    }
+
+    // Consultar reservas mensuales del alumno (reutilizando clases ya cargadas como respaldo)
+    let bookings: MonthlyBooking[] = [];
+    try {
+      bookings = await getStudentMonthlyBookings(user.uid, studentLessons);
+    } catch {
+      bookings = [];
+    }
+
+    if (currentRequestId !== loadRequestIdRef.current) return;
+    setMonthlyBookings(bookings);
+
+    // Resolver nombres de profesores desde clases ya cargadas + perfil puntual si faltara alguno
+    const resolvedTeacherNames: Record<string, string> = {};
+    for (const lesson of studentLessons) {
+      if (lesson.teacherId && lesson.teacherName) {
+        resolvedTeacherNames[lesson.teacherId] = lesson.teacherName;
+      }
+    }
+
+    const nowCheckMs = Date.now();
+    const activePendingBookings = bookings.filter((b) => {
+      if (b.status !== 'pending_payment_confirmation' && b.status !== 'pending_payment') {
+        return false;
+      }
+      const expMs = b.expiresAt?.toDate
+        ? b.expiresAt.toDate().getTime()
+        : b.expiresAt
+        ? new Date(b.expiresAt).getTime()
+        : 0;
+      return Boolean(b.id) && expMs > nowCheckMs;
+    });
+
+    const missingTeacherIds = Array.from(
+      new Set(
+        activePendingBookings
+          .map((b) => b.teacherId)
+          .filter((tid) => Boolean(tid) && !resolvedTeacherNames[tid])
+      )
+    );
+
+    if (missingTeacherIds.length > 0) {
+      const profiles = await Promise.allSettled(
+        missingTeacherIds.map((tid) => fetchUserProfile(tid))
+      );
+      if (currentRequestId !== loadRequestIdRef.current) return;
+      profiles.forEach((res, idx) => {
+        if (res.status === 'fulfilled' && res.value?.name) {
+          resolvedTeacherNames[missingTeacherIds[idx]] = res.value.name;
+        }
+      });
+    }
+
+    setTeacherNameById(resolvedTeacherNames);
+    setLoadingNotifications(false);
+
+    // Consultar datos bancarios autorizados solo para reservas pendientes vigentes
+    if (activePendingBookings.length === 0) {
+      setBankDetailsByBookingId({});
+      setLoadingBankDetailsByBookingId({});
+      return;
+    }
+
+    const loadingMap: Record<string, boolean> = {};
+    activePendingBookings.forEach((b) => {
+      if (b.id) loadingMap[b.id] = true;
+    });
+    setLoadingBankDetailsByBookingId(loadingMap);
+
+    const bankResults = await Promise.all(
+      activePendingBookings.map((b) => getPendingBookingBankDetails(b.id!))
+    );
+
+    if (currentRequestId !== loadRequestIdRef.current) return;
+
+    const nextBankMap: Record<string, PendingBookingBankDetailsResult> = {};
+    bankResults.forEach((res) => {
+      if (res.bookingId) {
+        nextBankMap[res.bookingId] = res;
+      }
+    });
+    setBankDetailsByBookingId(nextBankMap);
+    setLoadingBankDetailsByBookingId({});
   };
 
   useEffect(() => {
@@ -481,35 +607,18 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
             </div>
           )}
 
-          {/* BLOQUE INFERIOR: NOTICIAS O RECORDATORIOS IMPORTANTES (Identidad MusicKids) */}
-          <div
+          {/* BLOQUE INFERIOR: CENTRO DE NOTICIAS Y RECORDATORIOS IMPORTANTES */}
+          <NotificationCenter
             id="student-news-banner"
-            className="bg-white rounded-[24px] p-5 sm:p-6 shadow-xs border border-slate-100 flex items-center gap-5 sm:gap-6 mt-2"
-          >
-            {/* Megáfono visual con colores de MusicKids */}
-            <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-[#FFF5DB] text-[#FFB800] flex items-center justify-center shrink-0">
-              <Megaphone className="w-7 h-7 sm:w-8 sm:h-8 text-[#00537A] stroke-[2]" />
-            </div>
-
-            {/* Separador vertical */}
-            <div className="hidden sm:block w-px h-12 bg-slate-200 shrink-0" />
-
-            {/* Texto informativo */}
-            <div>
-              <h4
-                className="font-parkinsans font-bold text-base sm:text-lg text-[#00537A]"
-                style={{ fontFamily: "'Parkinsans', sans-serif" }}
-              >
-                Noticias o recordatorios importantes
-              </h4>
-              <p
-                className="font-siemreap text-slate-500 text-xs sm:text-sm mt-0.5"
-                style={{ fontFamily: "'Siemreap', sans-serif" }}
-              >
-                Aquí aparecerán tus tareas asignadas, avisos y novedades de tus profesores.
-              </p>
-            </div>
-          </div>
+            role="student"
+            loading={loadingNotifications}
+            bookings={monthlyBookings}
+            teacherNameById={teacherNameById}
+            bankDetailsByBookingId={bankDetailsByBookingId}
+            loadingBankDetailsByBookingId={loadingBankDetailsByBookingId}
+            tasks={tasks}
+            onNavigate={onNavigate}
+          />
     </StudentLayout>
   );
 };
