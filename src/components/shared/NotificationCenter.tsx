@@ -7,6 +7,7 @@ import {
   ArrowRight,
   Copy,
   Check,
+  CheckCircle2,
   Loader2,
   Info,
   Calendar,
@@ -117,7 +118,7 @@ interface TeacherNotificationCenterProps {
   loading?: boolean;
   bookings: MonthlyBooking[];
   studentNameById: Record<string, string>;
-  onViewBooking: (bookingId: string) => void;
+  onConfirmPayment: (booking: MonthlyBooking) => void;
 }
 
 interface StudentNotificationCenterProps {
@@ -348,12 +349,20 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = (props) => 
 
                   <div className="flex items-center sm:justify-end shrink-0">
                     <button
+                      id={`btn-confirm-payment-${bookingId}`}
                       type="button"
-                      onClick={() => props.onViewBooking(bookingId)}
-                      className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-full bg-[#00537A] hover:bg-[#004262] active:scale-95 text-white text-xs sm:text-sm font-bold shadow-2xs transition-all cursor-pointer whitespace-nowrap"
+                      disabled={expiresAtMs <= nowMs}
+                      onClick={() => {
+                        if (expiresAtMs <= Date.now()) {
+                          setNowMs(Date.now());
+                          return;
+                        }
+                        props.onConfirmPayment(booking);
+                      }}
+                      className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-full bg-[#00537A] hover:bg-[#004262] active:scale-95 text-white text-xs sm:text-sm font-bold shadow-2xs transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                     >
-                      <span>Ver reserva</span>
-                      <ArrowRight className="w-3.5 h-3.5 shrink-0" />
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>Confirmar pago</span>
                     </button>
                   </div>
                 </article>

@@ -12,7 +12,6 @@ import {
   AlertTriangle,
   X,
   ShieldCheck,
-  CreditCard,
   Video,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -78,19 +77,6 @@ function formatBookingMonth(monthStr?: string): string {
     }
   }
   return monthStr;
-}
-
-function formatBookingDate(val: any): string {
-  if (!val) return '—';
-  const d = val.toDate ? val.toDate() : new Date(val);
-  if (isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('es-AR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
 }
 
 function getDistinctSchedulesSummary(booking: MonthlyBooking): string {
@@ -181,7 +167,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
   // Estados para abonos mensuales
   const [monthlyBookings, setMonthlyBookings] = useState<MonthlyBooking[]>([]);
   const [loadingBookings, setLoadingBookings] = useState(true);
-  const [bookingsError, setBookingsError] = useState<string | null>(null);
 
   // Estados de modal de confirmación manual de pago (SUBBLOQUE 6B.6)
   const [selectedBookingForConfirm, setSelectedBookingForConfirm] = useState<MonthlyBooking | null>(
@@ -198,7 +183,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
   } | null>(null);
   const [provisioningBookingIds, setProvisioningBookingIds] = useState<Record<string, boolean>>({});
   const [showExpiredBookingsHistory, setShowExpiredBookingsHistory] = useState(false);
-  const [highlightedBookingId, setHighlightedBookingId] = useState<string | null>(null);
 
   const studentNameById = useMemo(() => {
     const map: Record<string, string> = {};
@@ -210,19 +194,24 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
     return map;
   }, [students]);
 
-  const handleViewPendingBooking = (bookingId: string) => {
-    const targetEl =
-      document.getElementById(`pending-booking-card-${bookingId}`) ||
-      document.getElementById('pending-bookings-title');
-
-    if (targetEl) {
-      targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const handleOpenConfirmPaymentModal = (booking: MonthlyBooking) => {
+    if (
+      !booking.id ||
+      (booking.status !== 'pending_payment_confirmation' &&
+        booking.status !== 'pending_payment')
+    ) {
+      return;
     }
 
-    setHighlightedBookingId(bookingId);
-    window.setTimeout(() => {
-      setHighlightedBookingId((prev) => (prev === bookingId ? null : prev));
-    }, 2600);
+    const expInfo = getBookingExpirationInfo(booking);
+    if (expInfo.isExpired) {
+      loadData();
+      return;
+    }
+
+    setSelectedBookingForConfirm(booking);
+    setConfirmError(null);
+    setIsConfirmModalOpen(true);
   };
 
   const loadData = async () => {
@@ -252,7 +241,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
 
     // 3. Cargar abonos mensuales del profesor
     setLoadingBookings(true);
-    setBookingsError(null);
     try {
       const bookings = await getTeacherMonthlyBookings(user.uid, teacherLessons);
       setMonthlyBookings(bookings);
@@ -267,17 +255,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
   useEffect(() => {
     loadData();
   }, [user?.uid]);
-
-  // Filtrar abonos pendientes de confirmación (SOLO aquellos vigentes dentro del plazo de 24 horas)
-  const pendingBookings = useMemo(() => {
-    return monthlyBookings.filter((b) => {
-      if (b.status !== 'pending_payment_confirmation' && b.status !== 'pending_payment') {
-        return false;
-      }
-      const expInfo = getBookingExpirationInfo(b);
-      return !expInfo.isExpired;
-    });
-  }, [monthlyBookings]);
 
   // Historial de abonos con plazo de 24 horas vencido / expirado
   const expiredBookings = useMemo(() => {
@@ -738,162 +715,21 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
         </button>
       </div>
 
-      {/* SECCIÓN 1: ABONOS PENDIENTES DE PAGO (SUBBLOQUE 6B.6) */}
-      <div className="space-y-4 pt-1">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-[#E8F3F8] text-[#00537A] flex items-center justify-center">
-              <CreditCard className="w-5 h-5" />
-            </div>
-            <h3
-              id="pending-bookings-title"
-              className="font-parkinsans text-xl sm:text-2xl font-bold text-[#00537A]"
-              style={{ fontFamily: "'Parkinsans', sans-serif" }}
-            >
-              Abonos pendientes de pago
-            </h3>
-            {pendingBookings.length > 0 && (
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-[#FFEAA7] text-[#7A5A00] border border-[#FFB800]/40">
-                {pendingBookings.length} {pendingBookings.length === 1 ? 'pendiente' : 'pendientes'}
-              </span>
-            )}
-          </div>
-          <span className="text-xs text-slate-500 font-medium">
-            Retención de 24 horas por transferencia bancaria
-          </span>
-        </div>
+      {/* CENTRO DE NOTICIAS Y RECORDATORIOS IMPORTANTES */}
+      <NotificationCenter
+        id="teacher-news-banner"
+        role="teacher"
+        loading={loadingBookings}
+        bookings={monthlyBookings}
+        studentNameById={studentNameById}
+        onConfirmPayment={handleOpenConfirmPaymentModal}
+      />
 
-        {loadingBookings ? (
-          <div className="bg-white rounded-[24px] p-8 border border-slate-100 flex flex-col items-center justify-center text-slate-400 gap-2 shadow-xs">
-            <Loader2 className="w-6 h-6 animate-spin text-[#00537A]" />
-            <span className="text-xs font-medium">Cargando abonos pendientes...</span>
-          </div>
-        ) : bookingsError ? (
-          <div className="bg-rose-50 border border-rose-200 rounded-[24px] p-6 text-center text-xs font-medium text-rose-700 flex items-center justify-center gap-2">
-            <AlertCircle className="w-5 h-5 shrink-0" />
-            <span>{bookingsError}</span>
-          </div>
-        ) : pendingBookings.length === 0 ? (
-          <div className="bg-white rounded-[24px] p-6 sm:p-8 border border-slate-100 text-center flex flex-col items-center justify-center shadow-xs">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-2">
-              <CheckCircle2 className="w-6 h-6" />
-            </div>
-            <h4 className="font-parkinsans text-sm sm:text-base font-bold text-slate-800">
-              No tienes transferencias pendientes de confirmación
-            </h4>
-            <p className="font-siemreap text-xs text-slate-500 mt-0.5">
-              Cuando un alumno reserve un abono mensual, aparecerá aquí durante 24 horas para que
-              verifiques el pago bancario.
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-4">
-            {pendingBookings.map((booking) => {
-              const expInfo = getBookingExpirationInfo(booking);
-              const studentName =
-                booking.studentName ||
-                students.find((s) => s.uid === booking.studentId)?.name ||
-                'Alumno';
-              const schedules = getDistinctSchedulesSummary(booking);
-              const totalAmount = (booking.totalPrice || booking.price || 0).toLocaleString(
-                'es-AR'
-              );
-
-              return (
-                <div
-                  key={booking.id}
-                  id={`pending-booking-card-${booking.id}`}
-                  className={`bg-white rounded-[24px] p-5 sm:p-6 shadow-xs border hover:shadow-md transition-all flex flex-col lg:flex-row lg:items-center justify-between gap-5 relative ${
-                    highlightedBookingId === booking.id
-                      ? 'border-[#FFB800] ring-2 ring-[#FFB800]/50 shadow-md'
-                      : 'border-slate-100'
-                  }`}
-                >
-                  {/* Datos Principales del Abono */}
-                  <div className="space-y-3 min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span
-                        className={`text-xs font-extrabold px-3 py-1 rounded-full border ${expInfo.badgeClass}`}
-                      >
-                        {expInfo.label}
-                      </span>
-                      <span className="text-xs font-bold text-[#00537A] bg-[#E8F3F8] px-3 py-1 rounded-full border border-[#00537A]/20">
-                        {booking.weeklyFrequency}{' '}
-                        {booking.weeklyFrequency === 1 ? 'clase/semana' : 'clases/semana'}
-                      </span>
-                      <span className="text-xs text-slate-400 font-semibold">
-                        ID: {booking.id?.substring(0, 10)}...
-                      </span>
-                    </div>
-
-                    <div className="space-y-1">
-                      <h4 className="font-parkinsans text-lg sm:text-xl font-bold text-slate-900 flex items-center gap-2">
-                        <User className="w-5 h-5 text-[#00537A] shrink-0" />
-                        <span>Alumno/a: {studentName}</span>
-                      </h4>
-                      <p className="text-xs text-slate-600 font-semibold flex items-center gap-1.5 flex-wrap">
-                        <Calendar className="w-4 h-4 text-slate-400 shrink-0" />
-                        <span>Mes: {formatBookingMonth(booking.month)}</span>
-                        <span>•</span>
-                        <span>{booking.totalLessons} clases programadas</span>
-                      </p>
-                    </div>
-
-                    {/* Fila de Horarios y Fechas Clave */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-100">
-                      <div>
-                        <span className="text-slate-400 font-bold block text-[10px] uppercase">
-                          Horarios reservados
-                        </span>
-                        <span className="font-semibold text-slate-800">{schedules}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 font-bold block text-[10px] uppercase">
-                          Fecha límite de confirmación
-                        </span>
-                        <span className="font-semibold text-amber-900 flex items-center gap-1">
-                          <Clock className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-                          <span>{formatBookingDate(booking.expiresAt)}</span>
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Lado Derecho: Importe y Botón de Confirmación */}
-                  <div className="flex flex-col sm:flex-row lg:flex-col items-start sm:items-center lg:items-end justify-between gap-3 shrink-0 pt-3 sm:pt-0 border-t lg:border-t-0 border-slate-100">
-                    <div className="text-left sm:text-right">
-                      <span className="text-[11px] font-bold text-slate-400 uppercase block">
-                        Importe por transferencia
-                      </span>
-                      <span className="text-xl sm:text-2xl font-extrabold text-[#00537A]">
-                        $ {totalAmount} {booking.currency || 'ARS'}
-                      </span>
-                    </div>
-
-                    <button
-                      id={`btn-confirm-payment-${booking.id}`}
-                      type="button"
-                      disabled={expInfo.isExpired}
-                      onClick={() => {
-                        setSelectedBookingForConfirm(booking);
-                        setConfirmError(null);
-                        setIsConfirmModalOpen(true);
-                      }}
-                      className="w-full sm:w-auto bg-[#00537A] hover:bg-[#003d5b] active:scale-95 text-white font-extrabold text-xs sm:text-sm px-6 py-3 rounded-full shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                    >
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 stroke-[2.5]" />
-                      <span>Confirmar pago recibido</span>
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* HISTORIAL DE ABONOS CON PLAZO VENCIDO (Liberados automáticamente) */}
-        {expiredBookings.length > 0 && (
-          <div className="mt-3 bg-slate-50/80 border border-slate-200/90 rounded-[20px] p-4 sm:p-5">
+      {(expiredBookings.length > 0 || confirmedBookingsNeedingMeet.length > 0) && (
+        <div className="space-y-4">
+          {/* HISTORIAL DE ABONOS CON PLAZO VENCIDO (Liberados automáticamente) */}
+          {expiredBookings.length > 0 && (
+            <div className="bg-slate-50/80 border border-slate-200/90 rounded-[20px] p-4 sm:p-5">
             <button
               type="button"
               onClick={() => setShowExpiredBookingsHistory((prev) => !prev)}
@@ -1047,7 +883,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
             </div>
           </div>
         )}
-      </div>
+        </div>
+      )}
 
       {/* SECCIÓN 2: PRÓXIMAS CLASES, CLASES PASADAS Y CANCELADAS */}
       <div className="space-y-4 pt-4 border-t border-slate-100">
@@ -1185,16 +1022,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onNavigate }
           </div>
         )}
       </div>
-
-      {/* BLOQUE INFERIOR: CENTRO DE NOTICIAS Y RECORDATORIOS IMPORTANTES */}
-      <NotificationCenter
-        id="teacher-news-banner"
-        role="teacher"
-        loading={loadingBookings}
-        bookings={monthlyBookings}
-        studentNameById={studentNameById}
-        onViewBooking={handleViewPendingBooking}
-      />
 
       {/* MODAL DE CONFIRMACIÓN MANUAL DE PAGO RECIBIDO (SUBBLOQUE 6B.6) */}
       {isConfirmModalOpen && selectedBookingForConfirm && (

@@ -378,6 +378,19 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
       onNavigate={onNavigate}
       onRefreshData={loadStudentLessons}
     >
+      {/* CENTRO DE NOTICIAS Y RECORDATORIOS IMPORTANTES */}
+      <NotificationCenter
+        id="student-news-banner"
+        role="student"
+        loading={loadingNotifications}
+        bookings={monthlyBookings}
+        teacherNameById={teacherNameById}
+        bankDetailsByBookingId={bankDetailsByBookingId}
+        loadingBankDetailsByBookingId={loadingBankDetailsByBookingId}
+        tasks={tasks}
+        onNavigate={onNavigate}
+      />
+
       {/* BANNER DESTACADO: BUSCAR PROFESORES */}
           <div
             id="student-search-teachers-banner"
@@ -606,19 +619,6 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onNavigate }
               )}
             </div>
           )}
-
-          {/* BLOQUE INFERIOR: CENTRO DE NOTICIAS Y RECORDATORIOS IMPORTANTES */}
-          <NotificationCenter
-            id="student-news-banner"
-            role="student"
-            loading={loadingNotifications}
-            bookings={monthlyBookings}
-            teacherNameById={teacherNameById}
-            bankDetailsByBookingId={bankDetailsByBookingId}
-            loadingBankDetailsByBookingId={loadingBankDetailsByBookingId}
-            tasks={tasks}
-            onNavigate={onNavigate}
-          />
     </StudentLayout>
   );
 };
